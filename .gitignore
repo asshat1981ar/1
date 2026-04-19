@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+*.egg
+pip-wheel-metadata/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Toolbank runtime data (keep schemas, gitignore the rest)
+toolbank/registry.db
+toolbank/records/*.json
+toolbank/evidence/
+toolbank/review_queue/
+toolbank/chroma_data/
+toolbank/.cache/
+
+# Next.js
+.next/
+out/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

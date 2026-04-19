@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/asshat1981ar/1/toolbank/schemas/toolbank_record.schema.json",
+  "title": "ToolbankRecord",
+  "description": "Canonical schema for a single discovered tool / API capability.",
+  "type": "object",
+  "required": ["id", "name", "namespace", "description"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier: '<namespace>.<name>'",
+      "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+    },
+    "name": {
+      "type": "string",
+      "description": "snake_case capability name"
+    },
+    "namespace": {
+      "type": "string",
+      "description": "Provider namespace (e.g. stripe, github)"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "Human-readable description of what the tool does"
+    },
+    "source_urls": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "description": "Documentation or spec URLs this record was derived from"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": ["openapi", "docs", "github", "mcp_server", "sdk", "cli"]
+    },
+    "transport": {
+      "type": "string",
+      "enum": ["rest", "graphql", "cli", "python", "node", "webhook", "local"]
+    },
+    "auth": {
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["api_key", "oauth", "none", "env_var"] },
+        "required_env": { "type": "array", "items": { "type": "string" } },
+        "scopes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "input_schema": {
+      "type": "object",
+      "description": "JSON Schema for the tool's input parameters"
+    },
+    "output_schema": {
+      "type": "object",
+      "description": "JSON Schema for the tool's response"
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["goal"],
+        "properties": {
+          "goal": { "type": "string" },
+          "arguments": { "type": "object" },
+          "expected_output": { "type": "object" }
+        }
+      }
+    },
+    "side_effect_level": {
+      "type": "string",
+      "enum": ["read", "write", "destructive"]
+    },
+    "permission_policy": {
+      "type": "string",
+      "enum": ["auto", "confirm", "deny"]
+    },
+    "rate_limit_notes": { "type": "string" },
+    "pricing_notes": { "type": "string" },
+    "install_notes": { "type": "string" },
+    "execution_adapter": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["http", "subprocess", "python_func", "graphql"] },
+        "method": { "type": "string" },
+        "url_template": { "type": "string" },
+        "command": { "type": "string" },
+        "args_template": { "type": "array", "items": { "type": "string" } },
+        "headers": { "type": "object" },
+        "sandbox": { "type": "boolean" },
+        "timeout_seconds": { "type": "integer" }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "version_hash": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "verified", "approved", "deprecated"]
+    },
+    "dna": {
+      "type": "object",
+      "description": "Tool-DNA fingerprint for semantic deduplication",
+      "properties": {
+        "intent": { "type": "string" },
+        "domain": { "type": "string" },
+        "action": { "type": "string" },
+        "object": { "type": "string" },
+        "input_signature": { "type": "array", "items": { "type": "string" } },
+        "auth_signature": { "type": "string" },
+        "side_effect": { "type": "string" },
+        "transport_signature": { "type": "string" }
+      }
+    }
+  }
+}
