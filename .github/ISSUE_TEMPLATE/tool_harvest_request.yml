@@ -1,0 +1,75 @@
+name: Tool Harvest Request
+description: Request that the Toolbank harvest a new API or tool source
+title: "[Harvest]: <provider name>"
+labels: ["harvest-request"]
+assignees:
+  - asshat1981ar
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request that the Toolbank harvester crawls and indexes a new tool source.
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider / Tool Name
+      placeholder: "e.g. Resend, Linear, Notion"
+    validations:
+      required: true
+
+  - type: input
+    id: seed_url
+    attributes:
+      label: Seed URL
+      description: The primary documentation or OpenAPI spec URL to harvest.
+      placeholder: "https://resend.com/docs/api-reference"
+    validations:
+      required: true
+
+  - type: input
+    id: openapi_url
+    attributes:
+      label: OpenAPI / Swagger URL (if known)
+      placeholder: "https://api.resend.com/openapi.json"
+    validations:
+      required: false
+
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Key Capabilities
+      description: What tools / API endpoints are most important to harvest?
+      placeholder: |
+        - Send email (POST /emails)
+        - List emails (GET /emails)
+        - Cancel email (POST /emails/:id/cancel)
+    validations:
+      required: false
+
+  - type: input
+    id: auth
+    attributes:
+      label: Auth Method
+      placeholder: "API Key (env: RESEND_API_KEY)"
+    validations:
+      required: false
+
+  - type: textarea
+    id: tags
+    attributes:
+      label: Suggested Tags
+      placeholder: "email, transactional, communications"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High — blocking a use case
+        - Medium — would be useful
+        - Low — nice to have
+    validations:
+      required: true

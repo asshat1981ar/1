@@ -1,0 +1,60 @@
+name: Scheduled Harvest
+
+on:
+  schedule:
+    # Run every day at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Specific source name to harvest (leave blank for all)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  harvest:
+    name: Harvest tool sources
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -e ".[all]"
+
+      - name: Restore toolbank database
+        uses: actions/cache@v4
+        with:
+          path: |
+            toolbank/registry.db
+            toolbank/records/
+            toolbank/chroma_data/
+          key: toolbank-data-${{ github.run_id }}
+          restore-keys: toolbank-data-
+
+      - name: Run harvest
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ github.event.inputs.source }}" ]; then
+            echo "Harvesting specific source: ${{ github.event.inputs.source }}"
+            toolbank harvest --config config/sources.yaml
+          else
+            toolbank harvest --config config/sources.yaml
+          fi
+
+      - name: Show registry stats
+        run: toolbank list --status approved
+
+      - name: Show capability gaps
+        run: toolbank gaps || true

@@ -1,0 +1,30 @@
+# CODEOWNERS
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for all files
+* @asshat1981ar
+
+# Python MCP server
+/mcp_server/ @asshat1981ar
+/tests/ @asshat1981ar
+/pyproject.toml @asshat1981ar
+
+# Next.js marketing site
+/app/ @asshat1981ar
+/components/ @asshat1981ar
+/public/ @asshat1981ar
+/package.json @asshat1981ar
+/next.config.js @asshat1981ar
+
+# Documentation
+/docs/ @asshat1981ar
+/README.md @asshat1981ar
+/CONTRIBUTING.md @asshat1981ar
+/CHANGELOG.md @asshat1981ar
+
+# Config and toolbank data
+/config/ @asshat1981ar
+/toolbank/schemas/ @asshat1981ar
+
+# CI/CD
+/.github/ @asshat1981ar
