@@ -11,6 +11,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   harvest:
     name: Harvest tool sources
