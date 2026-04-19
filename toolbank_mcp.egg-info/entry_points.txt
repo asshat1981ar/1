@@ -1,0 +1,2 @@
+[console_scripts]
+toolbank = mcp_server.cli:main
