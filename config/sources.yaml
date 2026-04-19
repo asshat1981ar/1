@@ -1,0 +1,51 @@
+# Toolbank Harvester – curated seed sources
+# Each source is crawled in priority order.
+
+sources:
+  - name: stripe
+    seed_urls:
+      - https://docs.stripe.com/api
+    priority: high
+    tags: [payments, commerce, billing]
+
+  - name: github
+    seed_urls:
+      - https://docs.github.com/en/rest
+    priority: high
+    tags: [vcs, code, git, devops]
+
+  - name: docker
+    seed_urls:
+      - https://docs.docker.com/reference/cli/docker/
+    priority: medium
+    tags: [containers, devops, infrastructure]
+
+  - name: openai
+    seed_urls:
+      - https://platform.openai.com/docs/api-reference
+    priority: high
+    tags: [ai, llm, completions]
+
+  - name: twilio
+    seed_urls:
+      - https://www.twilio.com/docs/sms
+    priority: medium
+    tags: [sms, communications, messaging]
+
+  - name: sendgrid
+    seed_urls:
+      - https://docs.sendgrid.com/api-reference
+    priority: medium
+    tags: [email, communications]
+
+  - name: supabase
+    seed_urls:
+      - https://supabase.com/docs/reference/javascript
+    priority: medium
+    tags: [database, auth, storage, backend]
+
+  - name: cloudinary
+    seed_urls:
+      - https://cloudinary.com/documentation/image_transformations
+    priority: medium
+    tags: [images, media, cdn]

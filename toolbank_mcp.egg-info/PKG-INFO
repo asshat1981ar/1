@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: toolbank-mcp
+Version: 0.1.0
+Summary: Toolbank Harvester + MCP Proxy Server
+Requires-Python: >=3.11
+Requires-Dist: mcp>=1.0.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: sqlalchemy>=2.0.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: beautifulsoup4>=4.12.0
+Requires-Dist: lxml>=5.0.0
+Requires-Dist: pyyaml>=6.0.0
+Provides-Extra: vector
+Requires-Dist: chromadb>=0.5.0; extra == "vector"
+Provides-Extra: llm
+Requires-Dist: openai>=1.0.0; extra == "llm"
+Provides-Extra: docs
+Requires-Dist: trafilatura>=1.8.0; extra == "docs"
+Requires-Dist: markdownify>=0.12.0; extra == "docs"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "dev"
+Provides-Extra: all
+Requires-Dist: chromadb>=0.5.0; extra == "all"
+Requires-Dist: openai>=1.0.0; extra == "all"
+Requires-Dist: trafilatura>=1.8.0; extra == "all"
+Requires-Dist: markdownify>=0.12.0; extra == "all"
+Requires-Dist: pytest>=8.0.0; extra == "all"
+Requires-Dist: pytest-asyncio>=0.23.0; extra == "all"

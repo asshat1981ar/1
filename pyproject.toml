@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toolbank-mcp"
+version = "0.1.0"
+description = "Toolbank Harvester + MCP Proxy Server"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "httpx>=0.27.0",
+    "sqlalchemy>=2.0.0",
+    "pydantic>=2.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+vector = ["chromadb>=0.5.0"]
+llm = ["openai>=1.0.0"]
+docs = ["trafilatura>=1.8.0", "markdownify>=0.12.0"]
+dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0"]
+all = [
+    "chromadb>=0.5.0",
+    "openai>=1.0.0",
+    "trafilatura>=1.8.0",
+    "markdownify>=0.12.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.scripts]
+toolbank = "mcp_server.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mcp_server*"]
