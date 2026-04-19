@@ -27,9 +27,9 @@ def _infer_side_effect(name: str, description: str, method: str = "") -> str:
 
 def _clean_name(name: str) -> str:
     """Convert to snake_case, remove non-alnum chars."""
-    name = re.sub(r"([A-Z])", r"_\1", name)  # camelCase → snake_case
+    name = re.sub(r"([A-Z])", r"_\1", name)  # camelCase/PascalCase → _snake_case (leading _ stripped below)
     name = re.sub(r"[^a-z0-9_]", "_", name.lower())
-    name = re.sub(r"_+", "_", name).strip("_")
+    name = re.sub(r"_+", "_", name).strip("_")  # collapse runs, remove leading/trailing underscores
     return name
 
 

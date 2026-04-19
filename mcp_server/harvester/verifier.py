@@ -18,7 +18,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-CONFIDENCE_THRESHOLD = 0.40  # records below this go straight to review queue
+CONFIDENCE_REVIEW_THRESHOLD = 0.40  # records below this go straight to review queue
 AUTO_APPROVE_THRESHOLD = 0.85  # records above this are auto-approved (read-only only)
 
 # Simple JSON Schema meta-schema check fields
@@ -122,9 +122,9 @@ def verify(
 
     # 6. Confidence gate
     confidence = float(record.get("confidence", 0.0))
-    if confidence < CONFIDENCE_THRESHOLD:
+    if confidence < CONFIDENCE_REVIEW_THRESHOLD:
         issues.append(
-            f"Confidence {confidence:.2f} is below threshold {CONFIDENCE_THRESHOLD}"
+            f"Confidence {confidence:.2f} is below threshold {CONFIDENCE_REVIEW_THRESHOLD}"
         )
 
     passed = len(issues) == 0

@@ -86,12 +86,15 @@ def search_tools(
     col = _get_collection()
     if col is None:
         return []
-    where = filters or {}
+    count = col.count()
+    if count == 0:
+        return []
     kwargs: dict[str, Any] = {
         "query_texts": [query],
-        "n_results": min(n_results, max(col.count(), 1)),
+        "n_results": min(n_results, count),
         "include": ["metadatas", "distances", "documents"],
     }
+    where = filters or {}
     if where:
         kwargs["where"] = where
     results = col.query(**kwargs)

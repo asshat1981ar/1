@@ -19,12 +19,12 @@ from .crawler import Crawler
 from .deduper import deduplicate
 from .extractors import extract_from_docs, extract_from_github_readme, extract_from_openapi
 from .normalizer import normalize
-from .verifier import CONFIDENCE_THRESHOLD, verify
+from .verifier import CONFIDENCE_REVIEW_THRESHOLD, verify
 
 logger = logging.getLogger(__name__)
 
 # Candidate confidence threshold for queuing vs. dropping
-QUEUE_THRESHOLD = 0.30
+CONFIDENCE_QUEUE_CUTOFF = 0.30
 
 _OPENAPI_PROBE_PATHS = [
     "/openapi.json",
@@ -243,7 +243,7 @@ class ToolbankHarvester:
             return rec
 
         confidence = float(rec.get("confidence", 0.0))
-        if confidence >= QUEUE_THRESHOLD:
+        if confidence >= CONFIDENCE_QUEUE_CUTOFF:
             # Queue for human review
             database.enqueue_for_review(
                 rec["id"], rec, confidence, result["issues"]
