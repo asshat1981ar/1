@@ -21,14 +21,14 @@
 - [x] CLI (`harvest`, `list`, `review`, `gaps`, `server`)
 - [x] ChromaDB semantic index
 - [x] Unit test suite
-- [x] No-Bull Marketing site (hero, CTA form, navbar, footer)
+- [x] ToolBank Webapp (hero search, scrape form, sources section, nav)
 
 ---
 
 ## v0.2 — Hardening 🚧
 
-- [ ] `StickyNav` component (scroll-aware section highlighting)
-- [ ] `ProofSection` component (case studies, metrics, client logos)
+- [x] `StickyNav` component (scroll-aware section highlighting)
+- [x] `ProofSection` component (supported sources, stat counters)
 - [ ] GraphQL adapter for `execute_tool`
 - [ ] Python function adapter for local tool execution
 - [ ] CI pipeline (GitHub Actions — lint + test on every PR)
@@ -70,6 +70,7 @@
 - [ ] Public tool marketplace UI
 - [ ] Verified publisher program
 - [ ] Toolbank SDK (Python + TypeScript client)
-- [ ] No-Bull Marketing — CMS-driven case studies
-- [ ] No-Bull Marketing — dark/light mode toggle
-- [ ] No-Bull Marketing — privacy-first analytics
+- [ ] ToolBank Webapp — tool browse/search page
+- [ ] ToolBank Webapp — tool detail page
+- [ ] ToolBank Webapp — dark/light mode toggle
+- [ ] ToolBank Webapp — privacy-first analytics

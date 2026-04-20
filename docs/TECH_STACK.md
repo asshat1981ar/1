@@ -18,7 +18,7 @@
 | Testing | pytest + pytest-asyncio | ≥ 8.0 / 0.23 | Unit & async tests |
 | Build | setuptools | ≥ 61 | Package build |
 
-## No-Bull Marketing (Next.js Frontend)
+## ToolBank Webapp (Next.js Frontend)
 
 | Layer | Technology | Version | Purpose |
 |---|---|---|---|
@@ -35,7 +35,7 @@
 | GitHub Actions | CI (lint, test, type-check) + scheduled harvests |
 | SQLite | Zero-dep embedded database for registry & review queue |
 | ChromaDB | Local-first vector database (no external service required) |
-| Vercel | Recommended deployment for the Next.js marketing site |
+| Vercel | Recommended deployment for the Next.js webapp |
 
 ## Environment Variables
 

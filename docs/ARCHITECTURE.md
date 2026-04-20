@@ -1,11 +1,11 @@
-# Architecture — Toolbank MCP + No-Bull Marketing
+# Architecture — Toolbank MCP + ToolBank Webapp
 
 This repository is a **monorepo** combining two systems that share a single deployment context:
 
 | System | Role | Runtime |
 |---|---|---|
 | **Toolbank MCP** | Self-improving MCP proxy server + autonomous tool harvester | Python 3.11+ |
-| **No-Bull Marketing** | Public-facing marketing site for the No-Bull agency | Next.js 14 (React 18) |
+| **ToolBank Webapp** | Public-facing webapp for discovering and scraping tools from any source | Next.js 14 (React 18) |
 
 ---
 
@@ -64,29 +64,27 @@ Verifier                    JSON Schema · safety rules · drift detection · co
 
 ---
 
-## No-Bull Marketing — Architecture
+## ToolBank Webapp — Architecture
 
-Next.js 14 App Router single-page marketing site.
+Next.js 14 App Router single-page webapp for tool discovery and scraping.
 
 ```
 app/
   layout.jsx      Root layout (Navbar + Footer wrapper)
-  page.jsx        Home page (StickyNav + HeroVideo + ProofSection + CTAFormSection)
+  page.jsx        Home page (StickyNav + Hero + ProofSection + ScrapeSection)
   globals.css     Tailwind base styles
 
 components/
-  Navbar.jsx         Fixed top navigation
+  Navbar.jsx         Fixed top navigation (ToolBank branding)
   Footer.jsx         Page footer
-  StickyNav.jsx      Scroll-aware sticky section nav  [TODO]
-  HeroVideo.jsx      Full-screen video hero with Framer Motion overlay
-  ProofSection.jsx   Social proof: case studies, metrics, logos  [TODO]
-  CTAFormSection.jsx Lead-capture form with honeypot spam guard
+  StickyNav.jsx      Scroll-aware side-rail section nav (IntersectionObserver)
+  HeroVideo.jsx      Full-screen gradient hero with tool search input
+  ProofSection.jsx   Supported source types + stat counters
+  CTAFormSection.jsx URL + source-type scrape form with honeypot spam guard
 
 public/
   media/
-    hero.mp4           Hero background video
-    hero-blur.jpg      Poster/blur placeholder
-    no-bull-deck.pdf   Downloadable pitch deck
+    (no required assets — video hero removed)
 ```
 
 ---
