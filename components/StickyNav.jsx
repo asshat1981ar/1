@@ -7,6 +7,11 @@ export default function StickyNav({ sections = [] }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? "");
   const observerRef = useRef(null);
 
+  // Reset active section when sections prop changes
+  useEffect(() => {
+    setActiveId(sections[0]?.id ?? "");
+  }, [sections]);
+
   useEffect(() => {
     const handleIntersect = (entries) => {
       for (const entry of entries) {

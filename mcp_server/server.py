@@ -448,6 +448,14 @@ def _execute_python_func(
     if allowlist and not any(module_path.startswith(prefix) for prefix in allowlist):
         return {"error": f"Module not in allowlist: {module_path}"}
 
+    if not allowlist:
+        logger.warning(
+            "python_func adapter for '%s.%s' has an empty allowlist — "
+            "any module may be imported; configure allowlist to restrict execution.",
+            module_path,
+            func_name,
+        )
+
     try:
         mod = importlib.import_module(module_path)
         func = getattr(mod, func_name)

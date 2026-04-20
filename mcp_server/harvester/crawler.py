@@ -241,7 +241,7 @@ class Crawler:
         """
         # Cache-Control: max-age takes precedence
         cache_control = headers.get("cache-control", "")
-        match = re.search(r"max-age=(\d+)", cache_control)
+        match = re.search(r"max-age\s*=\s*(\d+)", cache_control)
         if match:
             max_age = int(match.group(1))
             return time.time() + max_age

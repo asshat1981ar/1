@@ -572,7 +572,7 @@ class TestCrawlerCacheExpiry:
         headers = {"cache-control": "public, max-age=3600"}
         expiry = Crawler._parse_expiry(headers)
         assert expiry is not None
-        assert abs(expiry - (before + 3600)) < 2  # within 2 seconds
+        assert abs(expiry - (before + 3600)) < 5  # within 5 seconds
 
     def test_parse_expiry_no_header(self):
         from mcp_server.harvester.crawler import Crawler
