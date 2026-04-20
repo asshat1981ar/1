@@ -29,6 +29,11 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Audit Python dependencies
+        run: |
+          pip install pip-audit
+          pip-audit --skip-editable -r requirements.txt || true
+
       - name: Run tests
         run: pytest tests/ -v --tb=short
 
@@ -47,6 +52,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high || true
 
       - name: Build
         run: npm run build

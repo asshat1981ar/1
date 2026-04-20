@@ -81,12 +81,8 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 
 def cmd_review(args: argparse.Namespace) -> None:
-    from mcp_server.database import (
-        approve_review_item,
-        get_review_queue,
-        init_db,
-        reject_review_item,
-    )
+    from mcp_server.database import get_review_queue, init_db
+    from mcp_server.tui import run_review_tui
 
     init_db()
     items = get_review_queue()
@@ -94,25 +90,52 @@ def cmd_review(args: argparse.Namespace) -> None:
         print("Review queue is empty.")
         return
 
-    for item in items:
-        print("\n" + "=" * 60)
-        print(f"Queue ID : {item['queue_id']}")
-        print(f"Record ID: {item['record_id']}")
-        print(f"Confidence: {item['confidence']:.2f}")
-        print(f"Issues: {item['issues']}")
-        candidate = item["candidate"]
-        print(f"Description: {candidate.get('description','')}")
-        print(f"Source URLs: {candidate.get('source_urls', [])}")
+    run_review_tui(items)
 
-        action = input("\n[a]pprove / [r]eject / [s]kip? ").strip().lower()
-        if action == "a":
-            approve_review_item(item["queue_id"])
-            print("✓ Approved")
-        elif action == "r":
-            reject_review_item(item["queue_id"])
-            print("✗ Rejected")
+
+def cmd_export(args: argparse.Namespace) -> None:
+    """Export approved tool records to JSON or CSV.
+
+    Args:
+        args: Parsed CLI arguments with ``format`` and ``output`` attributes.
+    """
+    import csv
+
+    from mcp_server.database import init_db, list_tools
+
+    init_db()
+    records = list_tools(status="approved")
+
+    output = (
+        open(args.output, "w", newline="", encoding="utf-8") if args.output else sys.stdout
+    )
+    try:
+        if args.format == "csv":
+            if not records:
+                output.write("")
+                return
+            fieldnames = [
+                "id",
+                "name",
+                "namespace",
+                "description",
+                "side_effect_level",
+                "transport",
+                "confidence",
+                "status",
+                "tags",
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for rec in records:
+                row = {k: rec.get(k, "") for k in fieldnames}
+                row["tags"] = ",".join(rec.get("tags", []))
+                writer.writerow(row)
         else:
-            print("Skipped")
+            output.write(json.dumps(records, indent=2))
+    finally:
+        if args.output:
+            output.close()
 
 
 def cmd_gaps(args: argparse.Namespace) -> None:
@@ -169,6 +192,11 @@ def main():
     # server
     sub.add_parser("server", help="Start the MCP server (stdio transport)")
 
+    # export
+    p_export = sub.add_parser("export", help="Export approved tool records to JSON or CSV")
+    p_export.add_argument("--format", choices=["json", "csv"], default="json")
+    p_export.add_argument("--output", default=None, help="Output file path (default: stdout)")
+
     args = parser.parse_args()
     dispatch = {
         "harvest": cmd_harvest,
@@ -176,6 +204,7 @@ def main():
         "review": cmd_review,
         "gaps": cmd_gaps,
         "server": cmd_server,
+        "export": cmd_export,
     }
     if args.command not in dispatch:
         parser.print_help()

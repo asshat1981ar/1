@@ -1,5 +1,7 @@
 # Toolbank MCP – Toolbank Harvester
 
+![CI](https://github.com/asshat1981ar/1/actions/workflows/ci.yml/badge.svg)
+
 A self-improving MCP proxy server backed by an autonomous **Toolbank Harvester** that crawls public docs, OpenAPI specs, GitHub READMEs, and MCP server listings to populate a validated tool registry.
 
 ---

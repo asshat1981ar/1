@@ -5,6 +5,7 @@ mcp_server/cli.py
 mcp_server/database.py
 mcp_server/models.py
 mcp_server/server.py
+mcp_server/tui.py
 mcp_server/vector_store.py
 mcp_server/harvester/__init__.py
 mcp_server/harvester/classifier.py

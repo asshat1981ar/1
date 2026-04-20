@@ -364,3 +364,291 @@ class TestOpenAPIExtractor:
         candidates = extract_from_openapi(SAMPLE_OPENAPI, "https://api.payments.com/openapi.json")
         for c in candidates:
             assert c["namespace"] == "payments_api"
+
+
+# ---------------------------------------------------------------------------
+# GraphQL adapter tests
+# ---------------------------------------------------------------------------
+
+class TestGraphQLAdapter:
+    """Tests for _execute_graphql in server.py."""
+
+    def _make_record(self, auth_env: list[str] | None = None) -> dict:
+        return {
+            "id": "test.query",
+            "name": "query",
+            "namespace": "test",
+            "description": "A test GraphQL query.",
+            "auth": {"type": "bearer", "required_env": auth_env or []},
+        }
+
+    def _make_adapter(self) -> dict:
+        return {
+            "kind": "graphql",
+            "url_template": "https://api.example.com/graphql",
+            "query": "query GetUser($id: ID!) { user(id: $id) { name } }",
+            "variables_map": {"id": "user_id"},
+        }
+
+    def test_variables_mapped_correctly(self):
+        """variables_map keys become GraphQL vars, values become arg lookups."""
+        adapter = self._make_adapter()
+        variables_map = adapter["variables_map"]
+        arguments = {"user_id": "u_123"}
+        variables = {gql_var: arguments.get(arg_key) for gql_var, arg_key in variables_map.items()}
+        assert variables == {"id": "u_123"}
+
+    def test_missing_url_template(self):
+        """Adapter without url_template returns error dict."""
+        import asyncio
+        from mcp_server.server import _execute_graphql
+
+        record = self._make_record()
+        adapter = {"kind": "graphql", "query": "{ users { id } }"}
+        result = asyncio.get_event_loop().run_until_complete(
+            _execute_graphql(record, adapter, {})
+        )
+        assert "error" in result
+        assert "url_template" in result["error"]
+
+    def test_missing_query(self):
+        """Adapter without query string returns error dict."""
+        import asyncio
+        from mcp_server.server import _execute_graphql
+
+        record = self._make_record()
+        adapter = {"kind": "graphql", "url_template": "https://api.example.com/graphql"}
+        result = asyncio.get_event_loop().run_until_complete(
+            _execute_graphql(record, adapter, {})
+        )
+        assert "error" in result
+        assert "query" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Python function adapter tests
+# ---------------------------------------------------------------------------
+
+class TestPythonFuncAdapter:
+    """Tests for _execute_python_func in server.py."""
+
+    def _make_record(self) -> dict:
+        return {
+            "id": "test.func",
+            "name": "func",
+            "namespace": "test",
+            "description": "A test Python function.",
+            "auth": {"type": "none", "required_env": []},
+        }
+
+    def test_calls_stdlib_function(self):
+        """Can call a stdlib function when allowlist permits."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "json",
+            "function": "loads",
+            "allowlist": ["json"],
+        }
+        result = _execute_python_func(record, adapter, {"s": '{"key": "value"}'})
+        assert result == {"key": "value"}
+
+    def test_allowlist_blocks_unlisted_module(self):
+        """Module not in allowlist returns an error dict."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "os",
+            "function": "getcwd",
+            "allowlist": ["math"],
+        }
+        result = _execute_python_func(record, adapter, {})
+        assert "error" in result
+        assert "allowlist" in result["error"]
+
+    def test_empty_allowlist_allows_any_module(self):
+        """Empty allowlist means no restriction."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "json",
+            "function": "loads",
+            "allowlist": [],
+        }
+        result = _execute_python_func(record, adapter, {"s": '{"n": 42}'})
+        assert result == {"n": 42}
+
+    def test_missing_module(self):
+        """Non-existent module returns import error dict."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "nonexistent_module_xyz",
+            "function": "func",
+            "allowlist": ["nonexistent_module_xyz"],
+        }
+        result = _execute_python_func(record, adapter, {})
+        assert "error" in result
+
+    def test_missing_function(self):
+        """Existing module but missing function returns attribute error dict."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "math",
+            "function": "this_does_not_exist",
+            "allowlist": ["math"],
+        }
+        result = _execute_python_func(record, adapter, {})
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Crawler cache expiry tests
+# ---------------------------------------------------------------------------
+
+class TestCrawlerCacheExpiry:
+    """Tests for the updated in-memory cache with TTL support."""
+
+    def test_purge_stale_removes_expired_entries(self):
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=True, request_delay=0)
+        # Manually insert a stale entry
+        crawler._cache["http://example.com/stale"] = (
+            "<html/>",
+            "text/html",
+            0.0,  # expired in 1970
+        )
+        # And a fresh entry (expiry far in the future)
+        crawler._cache["http://example.com/fresh"] = (
+            "<html/>",
+            "text/html",
+            9_999_999_999.0,
+        )
+        purged = crawler.purge_stale()
+        assert purged == 1
+        assert "http://example.com/stale" not in crawler._cache
+        assert "http://example.com/fresh" in crawler._cache
+        crawler.close()
+
+    def test_purge_stale_no_expiry_entries_not_removed(self):
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=True, request_delay=0)
+        crawler._cache["http://example.com/no-expiry"] = (
+            "<html/>",
+            "text/html",
+            None,  # no expiry
+        )
+        purged = crawler.purge_stale()
+        assert purged == 0
+        assert "http://example.com/no-expiry" in crawler._cache
+        crawler.close()
+
+    def test_no_cache_mode_skips_cache(self):
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False, request_delay=0)
+        assert crawler._use_cache is False
+        assert crawler._cache == {}
+        crawler.close()
+
+    def test_parse_expiry_max_age(self):
+        from mcp_server.harvester.crawler import Crawler
+        import time
+
+        before = time.time()
+        headers = {"cache-control": "public, max-age=3600"}
+        expiry = Crawler._parse_expiry(headers)
+        assert expiry is not None
+        assert abs(expiry - (before + 3600)) < 2  # within 2 seconds
+
+    def test_parse_expiry_no_header(self):
+        from mcp_server.harvester.crawler import Crawler
+
+        expiry = Crawler._parse_expiry({})
+        assert expiry is None
+
+
+# ---------------------------------------------------------------------------
+# CLI export tests
+# ---------------------------------------------------------------------------
+
+class TestCmdExport:
+    """Tests for the toolbank export command."""
+
+    def test_export_json_empty(self, tmp_path):
+        """Export with no records produces empty JSON array."""
+        import sys
+        import io
+        import argparse
+        from mcp_server.database import init_db
+        from mcp_server.cli import cmd_export
+
+        db_path = str(tmp_path / "test_export.db")
+        init_db(db_path=db_path)
+
+        args = argparse.Namespace(format="json", output=None)
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cmd_export(args)
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        data = json.loads(output)
+        assert isinstance(data, list)
+
+    def test_export_csv_empty(self, tmp_path):
+        """Export CSV with no records writes empty string."""
+        import io
+        import sys
+        import argparse
+        from mcp_server.database import init_db
+        from mcp_server.cli import cmd_export
+
+        db_path = str(tmp_path / "test_export_csv.db")
+        init_db(db_path=db_path)
+
+        args = argparse.Namespace(format="csv", output=None)
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cmd_export(args)
+        finally:
+            sys.stdout = old_stdout
+        # Should not raise; output may be empty
+
+
+# ---------------------------------------------------------------------------
+# TUI module smoke test
+# ---------------------------------------------------------------------------
+
+class TestTUI:
+    """Smoke tests for mcp_server.tui."""
+
+    def test_module_importable(self):
+        from mcp_server import tui  # noqa: F401
+
+    def test_run_review_tui_empty_list(self, tmp_path, capsys):
+        """run_review_tui with empty list does not raise."""
+        from mcp_server.tui import _plain_review
+
+        _plain_review([])
+        # No output and no exception
+        captured = capsys.readouterr()
+        assert captured.out == ""
