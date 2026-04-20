@@ -49,9 +49,9 @@ docker run --rm -i \
 
 ---
 
-## No-Bull Marketing Site
+## ToolBank Webapp
 
-The Next.js site is deployed to **Vercel** (recommended) or any Node.js host.
+The Next.js webapp is deployed to **Vercel** (recommended) or any Node.js host.
 
 ### Vercel (recommended)
 
@@ -83,13 +83,7 @@ npm run build       # produces /out directory
 
 ## Required Media Assets
 
-Before deploying the marketing site, place these files in `public/media/`:
-
-| File | Description |
-|---|---|
-| `hero.mp4` | Full-screen hero background video (H.264, ≤ 10 MB recommended) |
-| `hero-blur.jpg` | Low-res blur poster shown before video loads (≤ 50 KB) |
-| `no-bull-deck.pdf` | Downloadable pitch deck |
+No media assets are required. The video hero has been replaced with a CSS gradient hero.
 
 ---
 

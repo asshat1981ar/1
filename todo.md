@@ -1,4 +1,4 @@
-# TODO — Toolbank MCP + No-Bull Marketing
+# TODO — Toolbank MCP + ToolBank Webapp
 
 > Gap analysis from the current state (v0.1 complete, v0.2 in progress) to the finished v1.0 product.
 > Status: ✅ Done · 🚧 In Progress · 🔲 Planned · 💡 Future
@@ -7,25 +7,30 @@
 
 ## v0.2 — Hardening (current sprint)
 
-### Frontend — No-Bull Marketing
+### Frontend — ToolBank Webapp
 
-- [ ] **`StickyNav` component** (`components/StickyNav.jsx`)
+- [x] **`StickyNav` component** (`components/StickyNav.jsx`)
   - Scroll-aware section highlighting using `IntersectionObserver`
   - Smooth active-state indicator transitions via Framer Motion
-  - Accepts a `sections` prop (array of `{ id, label }`)
-  - Mark with `"use client"` directive
-  - Wire into `app/page.jsx` between Navbar and HeroVideo
+  - Side-rail nav (hidden on mobile, visible on lg+ screens)
+  - Wired into `app/page.jsx` alongside Hero, ProofSection, ScrapeSection
 
-- [ ] **`ProofSection` component** (`components/ProofSection.jsx`)
-  - Display case studies, key metrics, and client logos
-  - Mark with `"use client"` directive
-  - Data sourced from a static array (CMS integration deferred to v1.0)
-  - Wire into `app/page.jsx` below HeroVideo
+- [x] **`ProofSection` component** (`components/ProofSection.jsx`)
+  - Displays supported source types (OpenAPI, GraphQL, MCP, Docs)
+  - Animated stat counters
+  - Wired into `app/page.jsx`
+
+- [x] **Hero / tool-search component** (`components/HeroVideo.jsx`)
+  - Full-screen gradient hero with tool search input
+  - Links to Scrape and Sources sections
+
+- [x] **Scrape form component** (`components/CTAFormSection.jsx`)
+  - URL + source-type form to trigger a harvest
+  - Honeypot spam prevention
+  - Success state with "scrape another" reset
 
 - [ ] **Public media assets** (`public/media/`)
-  - Add `hero.mp4` — full-screen background video for HeroVideo
-  - Add `hero-blur.jpg` — low-res poster/blur placeholder
-  - Add `no-bull-deck.pdf` — downloadable pitch deck
+  - No longer required — video hero removed
 
 ### Backend — Toolbank MCP
 
@@ -143,9 +148,10 @@
 - [ ] **Verified publisher program** — namespace ownership verification flow
 - [ ] **Toolbank SDK** — Python + TypeScript client libraries with type stubs
 
-### No-Bull Marketing
+### ToolBank Webapp (v1.0)
 
-- [ ] **CMS-driven case studies** — headless CMS (Contentful / Sanity) for `ProofSection`
+- [ ] **Tool browse / search results page** — paginated registry listing with filters by source type and namespace
+- [ ] **Tool detail page** — view full schema, evidence, and execution adapter for a single tool
 - [ ] **Dark / light mode toggle** — Tailwind `dark:` classes + `localStorage` persistence
 - [ ] **Privacy-first analytics** — Plausible or self-hosted Umami; no cookies
 

@@ -1,4 +1,4 @@
-# System Prompt — Toolbank MCP + No-Bull Marketing
+# System Prompt — Toolbank MCP + ToolBank Webapp
 
 > **Copy this entire document as the system prompt when starting a new agent session on this project.**
 > The agent must read and internalize every section before writing a single line of code.
@@ -12,7 +12,7 @@ You are an expert software engineer working on a **monorepo** that contains two 
 | System | Runtime | Purpose |
 |---|---|---|
 | **Toolbank MCP** | Python 3.11+ | Self-improving MCP proxy server + autonomous tool harvester |
-| **No-Bull Marketing** | Next.js 14 / React 18 | Public-facing marketing site for the No-Bull agency |
+| **ToolBank Webapp** | Next.js 14 / React 18 | Public-facing webapp for discovering and scraping tools from any source |
 
 The definitive architectural overview is in `docs/ARCHITECTURE.md`. Read it first on every session.
 
@@ -36,7 +36,7 @@ Before taking any action you must be proficient in the following areas. If a tas
 - `argparse` / `click` CLI building
 - `pytest` + `pytest-asyncio` testing
 
-### JavaScript / Next.js (No-Bull Marketing)
+### JavaScript / Next.js (ToolBank Webapp)
 - Next.js 14 App Router (`app/` directory, `layout.jsx`, `page.jsx`)
 - React 18 functional components and hooks (`useState`, `useEffect`, `useRef`)
 - `"use client"` directive — when and why to use it
@@ -335,10 +335,10 @@ Follow this inner loop on every task. Treat it as a mandatory checklist.
 | Area | Status |
 |---|---|
 | Toolbank MCP v0.1 | ✅ Complete — all foundation modules implemented and tested |
-| No-Bull Marketing hero + CTA + nav + footer | ✅ Complete |
-| `StickyNav` component | 🔲 Placeholder file exists, not implemented |
-| `ProofSection` component | 🔲 Placeholder file exists, not implemented |
-| Public media assets (`hero.mp4`, etc.) | 🔲 Directory exists, files missing |
+| ToolBank Webapp — hero, scrape form, sources section, nav, footer | ✅ Complete |
+| `StickyNav` component | ✅ Implemented |
+| `ProofSection` component | ✅ Implemented — supported sources + stat counters |
+| Public media assets (`hero.mp4`, etc.) | ✅ Not required — video hero replaced |
 | GraphQL adapter | 🔲 Not started |
 | Python function adapter | 🔲 Not started |
 | `toolbank review` TUI | 🔲 Not started |

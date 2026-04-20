@@ -1,4 +1,4 @@
-# Contributing to Toolbank MCP + No-Bull Marketing
+# Contributing to Toolbank MCP + ToolBank Webapp
 
 Thank you for your interest in contributing!
 
