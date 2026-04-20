@@ -1,5 +1,3 @@
-# Media assets for the No-Bull Marketing site
-# Place the following files here before deploying:
-#   hero.mp4        — full-screen hero background video
-#   hero-blur.jpg   — low-resolution poster frame (shown while video loads)
-#   no-bull-deck.pdf — downloadable pitch deck
+# Media assets
+
+No required assets — the video hero has been replaced with a CSS gradient hero.

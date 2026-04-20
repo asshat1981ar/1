@@ -93,18 +93,16 @@
 
 ---
 
-## No-Bull Marketing — Feature Index
+## ToolBank Webapp — Feature Index
 
 | Feature | Status | Description |
 |---|---|---|
-| Full-screen hero video | ✅ Implemented | Autoplay muted loop with Framer Motion overlay |
-| Animated headlines | ✅ Implemented | Fade + slide-in on mount |
-| CTA form | ✅ Implemented | Name + email lead capture |
-| Honeypot spam guard | ✅ Implemented | Hidden field blocks bot submissions |
-| Pitch deck download | ✅ Implemented | PDF linked from CTA section |
-| Fixed navigation | ✅ Implemented | Glassmorphism navbar, fixed top |
-| Scroll-aware sticky nav | 🔲 Planned | Highlights active section on scroll |
-| Social proof section | 🔲 Planned | Case studies, metrics, client logos |
+| Tool search hero | ✅ Implemented | Full-screen gradient hero with search input |
+| Supported-sources section | ✅ Implemented | Cards for OpenAPI, GraphQL, MCP, Docs with stat counters |
+| Scrape form | ✅ Implemented | URL + source-type form with honeypot spam guard and success state |
+| Fixed navigation | ✅ Implemented | Glassmorphism navbar with ToolBank branding |
+| Scroll-aware side nav | ✅ Implemented | Side-rail nav highlights active section via IntersectionObserver |
+| Tool browse/search page | 🔲 Planned | Paginated registry listing with filters |
+| Tool detail page | 🔲 Planned | Full schema, evidence, and execution adapter view |
 | Dark/light mode | 🔲 Planned | Theme toggle |
 | Analytics | 🔲 Planned | Privacy-first event tracking |
-| CMS integration | 🔲 Planned | Headless CMS for case studies and copy |

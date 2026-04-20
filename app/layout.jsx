@@ -3,8 +3,8 @@ import { Navbar } from '../components/Navbar';
 import { Footer } from '../components/Footer';
 
 export const metadata = {
-  title: 'No-Bull Marketing',
-  description: 'Unfiltered, results-driven creative agency. No fluff. Just impact.',
+  title: 'ToolBank',
+  description: 'Discover and scrape tools from across the web. One registry, every source.',
 };
 
 export default function RootLayout({ children }) {

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Rebranded frontend from "No-Bull Marketing" agency site to **ToolBank Webapp** — a tool-scraper and registry browser
+- `components/HeroVideo.jsx` — replaced video hero with full-screen gradient hero featuring tool search input
+- `components/CTAFormSection.jsx` — replaced marketing CTA form with "Scrape a New Source" form (URL + source-type selector, honeypot, success state)
+- `components/ProofSection.jsx` — implemented as a supported-sources showcase (OpenAPI, GraphQL, MCP, Docs) with animated stat cards
+- `components/StickyNav.jsx` — implemented scroll-aware side-rail nav using `IntersectionObserver` and Framer Motion
+- `components/Navbar.jsx` / `components/Footer.jsx` — updated branding and nav links to match ToolBank identity
+- `app/layout.jsx` — updated page title and description metadata
+- `package.json` — renamed app from `no-bull-marketing` to `toolbank-webapp`
+- `system_prompt.md` / `todo.md` — removed all No-Bull Marketing references
+
 ### Added
 - `app/` — proper Next.js App Router directory structure
 - `components/` — organised React component directory with `StickyNav` and `ProofSection` placeholders
