@@ -232,8 +232,8 @@ class TestDeduper:
         r2["source_urls"] = ["https://docs.stripe.com/alternate"]
         result = deduplicate([r1, r2])
         assert len(result) == 1
-        # Higher confidence wins
-        assert result[0]["confidence"] == 0.9
+        # Confidence is weighted average of merged sources
+        assert abs(result[0]["confidence"] - 0.8) < 1e-9
         # Both source URLs merged
         assert len(result[0]["source_urls"]) == 2
 

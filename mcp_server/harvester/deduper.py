@@ -90,31 +90,58 @@ def _dna_key(dna: dict[str, Any]) -> str:
 def deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Given a list of candidate records, return a deduplicated list.
-    When duplicates are found, the highest-confidence record wins
-    and its source_urls are merged.
+
+    When duplicates are found:
+    - Keep the record with the highest confidence as the primary.
+    - Merge ``source_urls`` from all duplicates (union, order-preserving).
+    - Merge ``evidence`` lists from all duplicates (union).
+    - Recompute ``confidence`` as the weighted average of the group.
     """
-    clusters: dict[str, dict[str, Any]] = {}
+    # Phase 1: group records by their DNA key
+    groups: dict[str, list[dict[str, Any]]] = {}
 
     for rec in records:
         dna = _build_dna(rec)
         key = _dna_key(dna)
         rec["dna"] = dna
+        groups.setdefault(key, []).append(rec)
 
-        if key not in clusters:
-            clusters[key] = rec
-        else:
-            existing = clusters[key]
-            # Merge source_urls
-            merged_urls = list(
-                dict.fromkeys(
-                    existing.get("source_urls", []) + rec.get("source_urls", [])
-                )
-            )
-            # Keep highest confidence
-            if rec.get("confidence", 0) > existing.get("confidence", 0):
-                rec["source_urls"] = merged_urls
-                clusters[key] = rec
-            else:
-                existing["source_urls"] = merged_urls
+    # Phase 2: merge each group into a single canonical record
+    result: list[dict[str, Any]] = []
+    for group in groups.values():
+        if len(group) == 1:
+            result.append(group[0])
+            continue
 
-    return list(clusters.values())
+        # Primary = highest confidence
+        primary = max(group, key=lambda r: r.get("confidence", 0))
+
+        # Merge source_urls (union, order-preserving)
+        merged_urls: list[str] = []
+        seen_urls: set[str] = set()
+        for r in group:
+            for url in r.get("source_urls", []):
+                if url not in seen_urls:
+                    merged_urls.append(url)
+                    seen_urls.add(url)
+
+        # Merge evidence lists (union)
+        merged_evidence: list[Any] = []
+        seen_evidence: set[str] = set()
+        for r in group:
+            for ev in r.get("evidence", []):
+                ev_key = json.dumps(ev, sort_keys=True) if isinstance(ev, dict) else str(ev)
+                if ev_key not in seen_evidence:
+                    merged_evidence.append(ev)
+                    seen_evidence.add(ev_key)
+
+        # Weighted-average confidence
+        avg_confidence = sum(r.get("confidence", 0) for r in group) / len(group)
+
+        primary = dict(primary)
+        primary["source_urls"] = merged_urls
+        primary["evidence"] = merged_evidence
+        primary["confidence"] = avg_confidence
+        result.append(primary)
+
+    return result
