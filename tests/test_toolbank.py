@@ -24,6 +24,7 @@ from mcp_server.harvester.verifier import verify
 from mcp_server.harvester.deduper import deduplicate
 from mcp_server.harvester.classifier import classify
 from mcp_server.harvester.extractors.openapi_extractor import extract_from_openapi
+from mcp_server.harvester.gap_miner import analyse_gaps, generate_seeds
 
 
 # ---------------------------------------------------------------------------
@@ -364,3 +365,85 @@ class TestOpenAPIExtractor:
         candidates = extract_from_openapi(SAMPLE_OPENAPI, "https://api.payments.com/openapi.json")
         for c in candidates:
             assert c["namespace"] == "payments_api"
+
+
+# ---------------------------------------------------------------------------
+# Gap Miner tests
+# ---------------------------------------------------------------------------
+
+class TestGapMiner:
+    def _failed(self, goal: str, n: int = 1) -> list[dict]:
+        return [{"user_goal": goal, "failed_query": goal} for _ in range(n)]
+
+    def test_analyse_gaps_counts_correctly(self):
+        queries = self._failed("send an email", 3) + self._failed("make a payment", 1)
+        gaps = analyse_gaps(queries)
+        assert gaps[0]["goal"] == "send an email"
+        assert gaps[0]["frequency"] == 3
+
+    def test_generate_seeds_email(self):
+        seeds = generate_seeds({"goal": "send an email notification"})
+        names = [s["name"] for s in seeds]
+        assert "sendgrid" in names
+
+    def test_generate_seeds_ai(self):
+        seeds = generate_seeds({"goal": "call an ai llm"})
+        names = [s["name"] for s in seeds]
+        assert "openai" in names
+
+    def test_generate_seeds_no_match_returns_empty(self):
+        seeds = generate_seeds({"goal": "xylophone concert"})
+        assert seeds == []
+
+    def test_generate_seeds_deduplicates(self):
+        # "message" should not produce duplicate twilio entries
+        seeds = generate_seeds({"goal": "send a sms message"})
+        urls = [s["url"] for s in seeds]
+        assert len(urls) == len(set(urls))
+
+
+# ---------------------------------------------------------------------------
+# Server adapter tests (unit-level, no real HTTP)
+# ---------------------------------------------------------------------------
+
+class TestPythonAdapter:
+    """Test the Python function adapter sandbox enforcement."""
+
+    def _record(self):
+        return {
+            "id": "test.func",
+            "name": "func",
+            "namespace": "test",
+            "description": "test",
+            "side_effect_level": "read",
+            "permission_policy": "auto",
+            "auth": {"type": "none", "required_env": []},
+            "status": "approved",
+        }
+
+    def test_blocked_module_returns_error(self):
+        from mcp_server.server import _execute_python
+        adapter = {"function": "os.getcwd"}
+        result = _execute_python(self._record(), adapter, {})
+        assert "error" in result
+        assert "allowlist" in result["error"]
+
+    def test_allowed_module_runs(self):
+        from mcp_server.server import _execute_python
+        adapter = {"function": "re.escape"}
+        result = _execute_python(self._record(), adapter, {"pattern": "hello.world"})
+        assert "result" in result
+        assert "hello" in result["result"]
+
+    def test_missing_function_field_returns_error(self):
+        from mcp_server.server import _execute_python
+        adapter = {}
+        result = _execute_python(self._record(), adapter, {})
+        assert "error" in result
+
+    def test_invalid_dotted_path_returns_error(self):
+        from mcp_server.server import _execute_python
+        adapter = {"function": "nodots"}
+        result = _execute_python(self._record(), adapter, {})
+        assert "error" in result
+

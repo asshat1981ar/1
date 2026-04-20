@@ -90,6 +90,7 @@ async def list_tools() -> list[types.Tool]:
             name="execute_tool",
             description=(
                 "Execute a tool from the toolbank by its ID. "
+                "Supports http, graphql, python, and subprocess adapters. "
                 "Write and destructive tools require explicit confirmation."
             ),
             inputSchema={
@@ -280,6 +281,10 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
     try:
         if kind == "http":
             result = await _execute_http(record, adapter, arguments)
+        elif kind == "graphql":
+            result = await _execute_graphql(record, adapter, arguments)
+        elif kind == "python":
+            result = _execute_python(record, adapter, arguments)
         elif kind == "subprocess":
             result = _execute_subprocess(record, adapter, arguments)
         else:
@@ -342,6 +347,150 @@ async def _execute_http(
         return response.json()
     except Exception:
         return {"status_code": response.status_code, "body": response.text}
+
+
+async def _execute_graphql(
+    record: dict[str, Any],
+    adapter: dict[str, Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a GraphQL adapter (POST query + variables to url_template)."""
+    url_template = adapter.get("url_template", "")
+    if not url_template:
+        return {"error": "No url_template in execution_adapter"}
+
+    gql_query = adapter.get("query", "")
+    if not gql_query:
+        return {"error": "No 'query' field in execution_adapter for graphql kind"}
+
+    headers: dict[str, str] = dict(adapter.get("headers", {}))
+    headers.setdefault("Content-Type", "application/json")
+
+    auth_info = record.get("auth", {})
+    for env_var in auth_info.get("required_env", []):
+        value = os.environ.get(env_var)
+        if value:
+            headers["Authorization"] = f"Bearer {value}"
+            break
+
+    payload = {"query": gql_query, "variables": _sanitize_graphql_variables(arguments)}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(url_template, json=payload, headers=headers)
+
+    try:
+        return response.json()
+    except Exception:
+        return {"status_code": response.status_code, "body": response.text}
+
+
+def _sanitize_graphql_variables(variables: dict[str, Any]) -> dict[str, Any]:
+    """
+    Validate that all variable values are JSON-serialisable primitives or
+    collections. Keys must be non-empty strings. This prevents injection of
+    unexpected types while still allowing nested objects (which are valid
+    GraphQL variable types).
+    """
+    import json as _json
+
+    sanitized: dict[str, Any] = {}
+    for key, value in variables.items():
+        if not isinstance(key, str) or not key:
+            continue
+        try:
+            # Round-trip through JSON to reject non-serialisable values
+            sanitized[key] = _json.loads(_json.dumps(value))
+        except (TypeError, ValueError):
+            logger.warning("GraphQL variable '%s' is not JSON-serialisable; skipped", key)
+    return sanitized
+
+
+_PYTHON_ADAPTER_ALLOWLIST = frozenset(
+    {
+        "json",
+        "math",
+        "re",
+        "datetime",
+        "collections",
+        "itertools",
+        "functools",
+        "string",
+        "textwrap",
+        "urllib.parse",
+        "hashlib",
+        "base64",
+        "pathlib",
+    }
+)
+
+
+def _execute_python(
+    record: dict[str, Any],
+    adapter: dict[str, Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Execute a Python function adapter.
+    adapter.function must be a dotted path to a callable, e.g. 'mymodule.my_function'.
+    Only modules listed in _PYTHON_ADAPTER_ALLOWLIST may be imported.
+    """
+    import importlib
+
+    function_path = adapter.get("function", "")
+    if not function_path:
+        return {"error": "No 'function' field in execution_adapter for python kind"}
+
+    parts = function_path.rsplit(".", 1)
+    if len(parts) != 2:
+        return {"error": f"Invalid function path '{function_path}' – expected 'module.callable'"}
+
+    module_path, func_name = parts
+    top_level = module_path.split(".")[0]
+    if top_level not in _PYTHON_ADAPTER_ALLOWLIST:
+        return {
+            "error": (
+                f"Module '{top_level}' is not in the Python adapter allowlist. "
+                f"Allowed: {sorted(_PYTHON_ADAPTER_ALLOWLIST)}"
+            )
+        }
+
+    try:
+        module = importlib.import_module(module_path)
+    except ImportError as exc:
+        return {"error": f"Could not import module '{module_path}': {exc}"}
+
+    func = getattr(module, func_name, None)
+    if func is None or not callable(func):
+        return {"error": f"'{func_name}' not found or not callable in '{module_path}'"}
+
+    # Validate argument names against the function signature to prevent
+    # passing unexpected keyword arguments.
+    import inspect as _inspect
+
+    try:
+        sig = _inspect.signature(func)
+        has_var_keyword = any(
+            p.kind == _inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+        )
+        if not has_var_keyword:
+            valid_params = set(sig.parameters.keys())
+            bad_args = set(arguments.keys()) - valid_params
+            if bad_args:
+                return {
+                    "error": (
+                        f"Unknown argument(s) for '{function_path}': {sorted(bad_args)}. "
+                        f"Expected parameters: {sorted(valid_params)}"
+                    )
+                }
+    except (ValueError, TypeError):
+        # inspect.signature may raise for built-ins; allow through
+        pass
+
+    try:
+        output = func(**arguments)
+        return {"result": output}
+    except Exception as exc:
+        logger.error("Python adapter error for %s: %s", record.get("id"), exc)
+        return {"error": str(exc), "traceback": traceback.format_exc()}
 
 
 def _execute_subprocess(

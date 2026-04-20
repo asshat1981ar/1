@@ -12,7 +12,7 @@ on:
         default: ""
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   harvest:
@@ -58,3 +58,15 @@ jobs:
 
       - name: Show capability gaps
         run: toolbank gaps || true
+
+      - name: Commit new tool records
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add toolbank/records/ toolbank/registry.db || true
+          if git diff --cached --quiet; then
+            echo "No new tool records to commit."
+          else
+            git commit -m "chore(harvest): add newly discovered tool records [skip ci]"
+            git push || echo "::warning::git push failed — records committed locally but not pushed."
+          fi
