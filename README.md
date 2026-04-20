@@ -1,5 +1,8 @@
 # Toolbank MCP – Toolbank Harvester
 
+[![CI](https://github.com/asshat1981ar/1/actions/workflows/ci.yml/badge.svg)](https://github.com/asshat1981ar/1/actions/workflows/ci.yml)
+[![Scheduled Harvest](https://github.com/asshat1981ar/1/actions/workflows/harvest-scheduled.yml/badge.svg)](https://github.com/asshat1981ar/1/actions/workflows/harvest-scheduled.yml)
+
 A self-improving MCP proxy server backed by an autonomous **Toolbank Harvester** that crawls public docs, OpenAPI specs, GitHub READMEs, and MCP server listings to populate a validated tool registry.
 
 ---
@@ -58,6 +61,8 @@ Execute a tool by ID with policy enforcement.
 Write-level tools return a `confirmation_required` response; re-call with `"confirmed": true`.
 Destructive tools are blocked unless an admin explicitly approves them.
 
+Supported `execution_adapter.kind` values: `http`, `graphql`, `python`, `subprocess`.
+
 ---
 
 ## Toolbank Record Schema
@@ -115,6 +120,12 @@ toolbank harvest --url https://docs.stripe.com/api
 ### Harvest from the curated sources config
 ```bash
 toolbank harvest --config config/sources.yaml
+```
+
+### Export approved records
+```bash
+toolbank export --format json --output tools.json
+toolbank export --format csv --output tools.csv --status approved
 ```
 
 ### List registry contents
