@@ -118,6 +118,19 @@ class DestructiveApproval(Base):
     approved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ToolExecution(Base):
+    __tablename__ = "tool_executions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tool_id = Column(String, nullable=False, index=True)
+    arguments = Column(JSON, nullable=False, default=dict)
+    result = Column(JSON, nullable=True)
+    status = Column(String, nullable=False)  # success | error | timeout | cancelled
+    duration_ms = Column(Integer, nullable=False)
+    error_message = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
 # ---------------------------------------------------------------------------
 # Registry CRUD helpers
 # ---------------------------------------------------------------------------
@@ -319,3 +332,59 @@ def clear_destructive_approval(tool_id: str) -> bool:
         session.delete(row)
         session.commit()
         return True
+
+
+# --------------------------------------------------------------------------
+# Execution history
+# --------------------------------------------------------------------------
+
+
+def log_tool_execution(
+    tool_id: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any] | None,
+    status: str,
+    duration_ms: int,
+    error_message: str | None = None,
+) -> None:
+    """Log a tool execution attempt to the database."""
+    with get_session() as session:
+        session.add(
+            ToolExecution(
+                tool_id=tool_id,
+                arguments=arguments,
+                result=result,
+                status=status,
+                duration_ms=duration_ms,
+                error_message=error_message,
+            )
+        )
+        session.commit()
+
+
+def get_tool_executions(
+    tool_id: str | None = None,
+    status: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Retrieve tool execution history."""
+    with get_session() as session:
+        query = session.query(ToolExecution)
+        if tool_id:
+            query = query.filter(ToolExecution.tool_id == tool_id)
+        if status:
+            query = query.filter(ToolExecution.status == status)
+        rows = query.order_by(ToolExecution.id.desc()).limit(limit).all()
+        return [
+            {
+                "id": r.id,
+                "tool_id": r.tool_id,
+                "arguments": r.arguments,
+                "result": r.result,
+                "status": r.status,
+                "duration_ms": r.duration_ms,
+                "error_message": r.error_message,
+                "timestamp": r.timestamp.isoformat() if r.timestamp else "",
+            }
+            for r in rows
+        ]
