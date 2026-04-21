@@ -1,6 +1,8 @@
-import '../globals.css';
+import './globals.css';
 import { Navbar } from '../components/Navbar';
 import { Footer } from '../components/Footer';
+import { ThemeProvider } from 'next-themes';
+import { TrackingPixel } from '../components/TrackingPixel';
 
 export const metadata = {
   title: 'ToolBank',
@@ -9,11 +11,14 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body className="bg-black text-white font-sans">
-        <Navbar />
-        <main className="mt-24">{children}</main>
-        <Footer />
+    <html lang="en" suppressHydrationWarning>
+      <body className="bg-white dark:bg-black text-zinc-900 dark:text-white font-sans transition-colors">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <TrackingPixel />
+          <Navbar />
+          <main className="mt-24">{children}</main>
+          <Footer />
+        </ThemeProvider>
       </body>
     </html>
   );

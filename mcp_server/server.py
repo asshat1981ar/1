@@ -19,16 +19,14 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import traceback
-from pathlib import Path
 from typing import Any
 
 import httpx
-from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp import types
 
+from mcp import types
+from mcp.server import Server
 from mcp_server import database, vector_store
 from mcp_server.harvester import ToolbankHarvester
 

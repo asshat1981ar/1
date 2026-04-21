@@ -12,14 +12,14 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 from .classifier import classify
 from .crawler import Crawler
 from .deduper import deduplicate
 from .extractors import extract_from_docs, extract_from_github_readme, extract_from_openapi
 from .normalizer import normalize
-from .verifier import CONFIDENCE_REVIEW_THRESHOLD, verify
+from .verifier import verify
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +166,7 @@ class ToolbankHarvester:
         if page_type == "openapi":
             try:
                 import json as _json
+
                 import yaml as _yaml  # type: ignore
 
                 if content.lstrip().startswith("{"):

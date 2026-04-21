@@ -81,38 +81,12 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 
 def cmd_review(args: argparse.Namespace) -> None:
-    from mcp_server.database import (
-        approve_review_item,
-        get_review_queue,
-        init_db,
-        reject_review_item,
-    )
+    from mcp_server.database import init_db
 
     init_db()
-    items = get_review_queue()
-    if not items:
-        print("Review queue is empty.")
-        return
+    from mcp_server.tui import run_review_tui
 
-    for item in items:
-        print("\n" + "=" * 60)
-        print(f"Queue ID : {item['queue_id']}")
-        print(f"Record ID: {item['record_id']}")
-        print(f"Confidence: {item['confidence']:.2f}")
-        print(f"Issues: {item['issues']}")
-        candidate = item["candidate"]
-        print(f"Description: {candidate.get('description','')}")
-        print(f"Source URLs: {candidate.get('source_urls', [])}")
-
-        action = input("\n[a]pprove / [r]eject / [s]kip? ").strip().lower()
-        if action == "a":
-            approve_review_item(item["queue_id"])
-            print("✓ Approved")
-        elif action == "r":
-            reject_review_item(item["queue_id"])
-            print("✗ Rejected")
-        else:
-            print("Skipped")
+    run_review_tui()
 
 
 def cmd_gaps(args: argparse.Namespace) -> None:
@@ -137,6 +111,7 @@ def cmd_gaps(args: argparse.Namespace) -> None:
 def cmd_export(args: argparse.Namespace) -> None:
     import csv
     import io
+
     from mcp_server.database import init_db, list_tools
 
     init_db()

@@ -5,7 +5,6 @@ Inspects README, package.json, pyproject.toml, openapi files, etc.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any

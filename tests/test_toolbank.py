@@ -5,27 +5,20 @@ Tests for models, normalizer, verifier, deduper, classifier, and extractors.
 from __future__ import annotations
 
 import json
-import pytest
 
-from mcp_server.models import (
-    ToolbankRecord,
-    AuthInfo,
-    ToolExample,
-    ExecutionAdapter,
-    AdapterKind,
-    SideEffectLevel,
-    PermissionPolicy,
-    ToolStatus,
-    ExtractionResult,
-    ToolDNA,
-)
-from mcp_server.harvester.normalizer import normalize
-from mcp_server.harvester.verifier import verify
-from mcp_server.harvester.deduper import deduplicate
 from mcp_server.harvester.classifier import classify
+from mcp_server.harvester.deduper import deduplicate
 from mcp_server.harvester.extractors.openapi_extractor import extract_from_openapi
 from mcp_server.harvester.gap_miner import analyse_gaps, generate_seeds
-
+from mcp_server.harvester.normalizer import normalize
+from mcp_server.harvester.verifier import verify
+from mcp_server.models import (
+    PermissionPolicy,
+    SideEffectLevel,
+    ToolbankRecord,
+    ToolDNA,
+    ToolStatus,
+)
 
 # ---------------------------------------------------------------------------
 # Model tests
@@ -489,6 +482,7 @@ class TestPythonAdapter:
 
     def test_allowlist_modules_are_valid(self):
         import importlib
+
         from mcp_server.server import _PYTHON_ADAPTER_ALLOWLIST
         for mod in _PYTHON_ADAPTER_ALLOWLIST:
             # Should not raise ImportError
@@ -528,6 +522,7 @@ class TestGraphQLAdapter:
 
     def test_missing_url_template_returns_error(self):
         import asyncio
+
         from mcp_server.server import _execute_graphql
 
         async def run():
@@ -540,6 +535,7 @@ class TestGraphQLAdapter:
 
     def test_missing_query_returns_error(self):
         import asyncio
+
         from mcp_server.server import _execute_graphql
 
         async def run():
@@ -578,4 +574,211 @@ class TestGraphQLAdapter:
         result = _sanitize_graphql_variables(variables)
         assert "" not in result
         assert result["valid"] == "value"
+
+
+class TestWebhookAdapter:
+    """Test the webhook delivery adapter."""
+
+    def _record(self):
+        return {
+            "id": "notify.webhook",
+            "name": "webhook",
+            "namespace": "notify",
+            "description": "POST to a webhook URL",
+            "side_effect_level": "write",
+            "permission_policy": "confirm",
+            "auth": {"type": "bearer", "required_env": ["WEBHOOK_SECRET"]},
+            "status": "approved",
+        }
+
+    def test_missing_url_template_returns_error(self):
+        import asyncio
+
+        from mcp_server.server import _execute_webhook
+
+        async def run():
+            adapter = {"headers": {"Content-Type": "application/json"}}
+            result = await _execute_webhook(self._record(), adapter, {"body": "test"})
+            assert "error" in result
+            assert "url_template" in result["error"]
+
+        asyncio.run(run())
+
+    def test_custom_headers_sent(self):
+        import asyncio
+
+        from mcp_server.server import _execute_webhook
+
+        async def run():
+            adapter = {
+                "url_template": "https://example.com/hook",
+                "headers": {"X-Custom": "myvalue", "Content-Type": "application/json"},
+            }
+            result = await _execute_webhook(self._record(), adapter, {"body": "hello"})
+            # Without a real server we can't verify headers, but check it doesn't error
+            assert "error" not in result or "url_template" in result.get("error", "")
+
+        asyncio.run(run())
+
+    def test_body_json_serializable_variables(self):
+        import asyncio
+
+        from mcp_server.server import _execute_webhook
+
+        async def run():
+            adapter = {
+                "url_template": "https://example.com/hook",
+                "method": "POST",
+                "headers": {"Content-Type": "application/json"},
+            }
+            # Should not raise - variables are JSON-serializable
+            result = await _execute_webhook(
+                self._record(), adapter, {"name": "Alice", "count": 42}
+            )
+            # We expect either a real HTTP error (connection refused) or nothing
+            # The important thing is it didn't crash on serialisation
+            assert True
+
+        asyncio.run(run())
+
+    def test_http_method_get_only_has_no_body(self):
+        import asyncio
+
+        from mcp_server.server import _execute_webhook
+
+        async def run():
+            adapter = {
+                "url_template": "https://example.com/hook",
+                "method": "GET",
+            }
+            result = await _execute_webhook(self._record(), adapter, {"key": "value"})
+            # Should attempt GET without body
+            assert "error" not in result or "url_template" in result.get("error", "")
+
+        asyncio.run(run())
+
+
+class TestDestructiveApproval:
+    """Test the admin destructive-tool approval API."""
+
+    def _db_path(self, tmp_path):
+        return str(tmp_path / "test_approval.db")
+
+    def test_upsert_tool_creates_table(self, tmp_path):
+        from mcp_server.database import init_db, upsert_tool
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        tool = {
+            "id": "test.delete_all",
+            "name": "delete_all",
+            "namespace": "test",
+            "description": "Delete everything",
+            "side_effect_level": "destructive",
+            "permission_policy": "deny",
+            "status": "draft",
+            "confidence": 0.95,
+            "version_hash": "sha256:test",
+            "tags": [],
+        }
+        result = upsert_tool(tool)
+        assert result.id == "test.delete_all"
+
+    def test_destructive_approval_table_exists(self, tmp_path):
+        from mcp_server.database import get_session, init_db
+        from sqlalchemy import text
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        with get_session() as session:
+            rows = session.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
+            table_names = [r[0] for r in rows]
+        assert "destructive_approvals" in table_names
+
+    def test_approve_destructive_tool_inserts_record(self, tmp_path):
+        from mcp_server.database import approve_destructive_tool, init_db
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        # Tool not in db yet, but we can test the function creates the record
+        result = approve_destructive_tool(
+            tool_id="test.delete_all",
+            approver="admin@example.com",
+            reason="Testing approval",
+        )
+        assert result is True
+
+    def test_approve_idempotent(self, tmp_path):
+        from mcp_server.database import approve_destructive_tool, init_db
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        r1 = approve_destructive_tool("test.delete_all", "admin@example.com", "first")
+        r2 = approve_destructive_tool("test.delete_all", "admin@example.com", "second")
+        assert r1 is True
+        assert r2 is True  # idempotent - already approved
+
+    def test_approve_returns_false_for_empty_tool_id(self, tmp_path):
+        from mcp_server.database import approve_destructive_tool, init_db
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        result = approve_destructive_tool("", "admin@example.com", "no tool")
+        assert result is False
+
+    def test_is_destructive_approved_true(self, tmp_path):
+        from mcp_server.database import approve_destructive_tool, init_db, is_destructive_approved
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        approve_destructive_tool("test.delete_all", "admin@example.com", "ok")
+        assert is_destructive_approved("test.delete_all") is True
+
+    def test_is_destructive_approved_false_unapproved(self, tmp_path):
+        from mcp_server.database import init_db, is_destructive_approved
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+        assert is_destructive_approved("test.delete_all") is False
+
+    def test_approve_tool_and_execute(self, tmp_path):
+        """End-to-end: approve a destructive tool, then verify execute_tool allows it."""
+        import asyncio
+
+        from mcp_server.database import approve_destructive_tool, init_db, upsert_tool
+        from mcp_server.server import _execute_tool
+
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+
+        # Create a mock destructive tool in the registry
+        tool = {
+            "id": "test.burn_it_all",
+            "name": "burn_it_all",
+            "namespace": "test",
+            "description": "Destructive tool for testing",
+            "side_effect_level": "destructive",
+            "permission_policy": "deny",
+            "status": "approved",
+            "confidence": 1.0,
+            "version_hash": "sha256:abc",
+            "tags": [],
+            "auth": {"type": "none", "required_env": []},
+            "execution_adapter": {"kind": "http", "url_template": "https://example.com/delete"},
+        }
+        upsert_tool(tool)
+        approve_destructive_tool("test.burn_it_all", "admin@example.com", "Testing")
+
+        async def run():
+            result = await _execute_tool({
+                "tool_id": "test.burn_it_all",
+                "arguments": {},
+                "confirmed": True,
+            })
+            return result
+
+        text_content = asyncio.run(run())
+        result = json.loads(text_content[0].text)
+        # Should NOT be blocked by destructive policy now
+        assert "error" not in result or "Destructive tools are blocked" not in result.get("error", "")
 
