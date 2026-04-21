@@ -1,6 +1,8 @@
 # Python
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.cpython-*.pyc
 *.pyo
 *.egg-info/
 dist/
@@ -9,7 +11,13 @@ build/
 .venv/
 venv/
 *.egg
+*.egg-info/
 pip-wheel-metadata/
+
+# SQLite WAL/shm (runtime state)
+*.db-shm
+*.db-wal
+pageviews.db
 
 # Environment
 .env
