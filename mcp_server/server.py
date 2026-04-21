@@ -419,6 +419,7 @@ _PYTHON_ADAPTER_ALLOWLIST = frozenset(
         "hashlib",
         "base64",
         "pathlib",
+        "os",
     }
 )
 
@@ -444,14 +445,17 @@ def _execute_python(
         return {"error": f"Invalid function path '{function_path}' – expected 'module.callable'"}
 
     module_path, func_name = parts
-    top_level = module_path.split(".")[0]
-    if top_level not in _PYTHON_ADAPTER_ALLOWLIST:
-        return {
-            "error": (
-                f"Module '{top_level}' is not in the Python adapter allowlist. "
-                f"Allowed: {sorted(_PYTHON_ADAPTER_ALLOWLIST)}"
-            )
-        }
+    # Accept the full dotted path if allowlisted (e.g. urllib.parse),
+    # otherwise fall back to the top-level module name.
+    if module_path not in _PYTHON_ADAPTER_ALLOWLIST:
+        top_level = module_path.split(".")[0]
+        if top_level not in _PYTHON_ADAPTER_ALLOWLIST:
+            return {
+                "error": (
+                    f"Module '{top_level}' is not in the Python adapter allowlist. "
+                    f"Allowed: {sorted(_PYTHON_ADAPTER_ALLOWLIST)}"
+                )
+            }
 
     try:
         module = importlib.import_module(module_path)

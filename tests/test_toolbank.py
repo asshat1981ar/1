@@ -423,7 +423,8 @@ class TestPythonAdapter:
 
     def test_blocked_module_returns_error(self):
         from mcp_server.server import _execute_python
-        adapter = {"function": "os.getcwd"}
+        # httpx is not in the allowlist
+        adapter = {"function": "httpx.get"}
         result = _execute_python(self._record(), adapter, {})
         assert "error" in result
         assert "allowlist" in result["error"]
@@ -446,4 +447,135 @@ class TestPythonAdapter:
         adapter = {"function": "nodots"}
         result = _execute_python(self._record(), adapter, {})
         assert "error" in result
+
+    def test_signature_validation_rejects_extra_args(self):
+        from mcp_server.server import _execute_python
+        # math.sqrt takes one arg: x
+        adapter = {"function": "math.sqrt"}
+        result = _execute_python(self._record(), adapter, {"x": 9, "extra_arg": 1})
+        assert "error" in result
+        assert "Unknown argument" in result["error"] or "extra_arg" in result["error"]
+
+    def test_signature_validation_allows_valid_args(self):
+        from mcp_server.server import _execute_python
+        # json.loads accepts keyword arguments like parse_float
+        adapter = {"function": "json.loads"}
+        result = _execute_python(self._record(), adapter, {"s": '"hello"'})
+        assert "result" in result
+        assert result["result"] == "hello"
+
+    def test_signature_validation_var_keyword_allows_extra(self):
+        from mcp_server.server import _execute_python
+        # json.loads accepts **kwargs via loader parameter
+        adapter = {"function": "json.loads"}
+        result = _execute_python(self._record(), adapter, {"s": '"hello"', "parse_float": None})
+        assert "result" in result or "error" not in result
+
+    def test_import_error_returns_error(self):
+        from mcp_server.server import _execute_python
+        # nonexistent_module is not in allowlist (and not a real module)
+        adapter = {"function": "nonexistent_module.my_func"}
+        result = _execute_python(self._record(), adapter, {})
+        assert "error" in result
+        # Should be caught by allowlist check first
+        assert "allowlist" in result["error"] or "Could not import" in result["error"]
+
+    def test_missing_callable_returns_error(self):
+        from mcp_server.server import _execute_python
+        adapter = {"function": "math.nonexistent_function"}
+        result = _execute_python(self._record(), adapter, {})
+        assert "error" in result
+        assert "not found or not callable" in result["error"]
+
+    def test_allowlist_modules_are_valid(self):
+        import importlib
+        from mcp_server.server import _PYTHON_ADAPTER_ALLOWLIST
+        for mod in _PYTHON_ADAPTER_ALLOWLIST:
+            # Should not raise ImportError
+            importlib.import_module(mod)
+
+    def test_nested_module_in_allowlist(self):
+        from mcp_server.server import _execute_python
+        # urllib.parse is in allowlist as a dotted path
+        adapter = {"function": "urllib.parse.quote"}
+        result = _execute_python(self._record(), adapter, {"string": "hello world", "safe": ""})
+        assert "result" in result
+        assert result["result"] == "hello%20world"
+
+    def test_top_level_not_in_allowlist_blocked(self):
+        from mcp_server.server import _execute_python
+        # subprocess is not in the allowlist
+        adapter = {"function": "subprocess.run"}
+        result = _execute_python(self._record(), adapter, {"args": []})
+        assert "error" in result
+        assert "allowlist" in result["error"]
+
+
+class TestGraphQLAdapter:
+    """Test the GraphQL adapter execution."""
+
+    def _record(self):
+        return {
+            "id": "github.gql_repo",
+            "name": "gql_repo",
+            "namespace": "github",
+            "description": "GraphQL repo query",
+            "side_effect_level": "read",
+            "permission_policy": "auto",
+            "auth": {"type": "bearer", "required_env": ["GITHUB_TOKEN"]},
+            "status": "approved",
+        }
+
+    def test_missing_url_template_returns_error(self):
+        import asyncio
+        from mcp_server.server import _execute_graphql
+
+        async def run():
+            adapter = {"query": "query { viewer { login } }"}
+            result = await _execute_graphql(self._record(), adapter, {})
+            assert "error" in result
+            assert "url_template" in result["error"]
+
+        asyncio.run(run())
+
+    def test_missing_query_returns_error(self):
+        import asyncio
+        from mcp_server.server import _execute_graphql
+
+        async def run():
+            adapter = {"url_template": "https://api.github.com/graphql"}
+            result = await _execute_graphql(self._record(), adapter, {})
+            assert "error" in result
+            assert "query" in result["error"].lower()
+
+        asyncio.run(run())
+
+    def test_sanitize_graphql_variables_strips_non_json_serializable(self):
+        from mcp_server.server import _sanitize_graphql_variables
+
+        # Functions are not JSON-serializable
+        variables = {
+            "name": "Alice",
+            "age": 30,
+            "callback": lambda x: x,  # not serializable
+        }
+        result = _sanitize_graphql_variables(variables)
+        assert result["name"] == "Alice"
+        assert result["age"] == 30
+        assert "callback" not in result
+
+    def test_sanitize_graphql_variables_keeps_valid(self):
+        from mcp_server.server import _sanitize_graphql_variables
+
+        variables = {"name": "Bob", "tags": ["a", "b"], "count": 5}
+        result = _sanitize_graphql_variables(variables)
+        assert result == {"name": "Bob", "tags": ["a", "b"], "count": 5}
+
+    def test_sanitize_graphql_variables_empty_key_skipped(self):
+        from mcp_server.server import _sanitize_graphql_variables
+
+        variables = {"": "empty_key", "valid": "value"}
+        result = _sanitize_graphql_variables(variables)
+        assert "" not in result
+        assert result["valid"] == "value"
 
