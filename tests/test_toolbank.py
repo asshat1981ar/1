@@ -405,9 +405,7 @@ class TestGraphQLAdapter:
 
         record = self._make_record()
         adapter = {"kind": "graphql", "query": "{ users { id } }"}
-        result = asyncio.get_event_loop().run_until_complete(
-            _execute_graphql(record, adapter, {})
-        )
+        result = asyncio.run(_execute_graphql(record, adapter, {}))
         assert "error" in result
         assert "url_template" in result["error"]
 
@@ -418,9 +416,7 @@ class TestGraphQLAdapter:
 
         record = self._make_record()
         adapter = {"kind": "graphql", "url_template": "https://api.example.com/graphql"}
-        result = asyncio.get_event_loop().run_until_complete(
-            _execute_graphql(record, adapter, {})
-        )
+        result = asyncio.run(_execute_graphql(record, adapter, {}))
         assert "error" in result
         assert "query" in result["error"]
 
