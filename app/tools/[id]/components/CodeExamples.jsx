@@ -9,21 +9,19 @@ const LANGUAGES = [
 
 function generatePython(name, schema) {
   const props = schema.properties || {};
-  const required = schema.required || [];
-  const args = Object.keys(props).map((k) => {
-    const t = props[k].type || "string";
-    const def = required.includes(k) ? "" : "=None";
-    return `${k}: ${t}${def}`;
-  });
-  return `from your_tool_library import call_tool
+  const argsObj = Object.fromEntries(
+    Object.keys(props).map((k) => [k, props[k].type === "integer" || props[k].type === "number" ? 0 : k])
+  );
+  const body = JSON.stringify({ arguments: argsObj, confirmed: false });
+  return `import requests
 
-result = call_tool(
-    "${name}",
-    {
-${Object.keys(props).map((k) => `        "${k}": ${props[k].type === "integer" || props[k].type === "number" ? "0" : `"${k}"`}`).join(",\n")}
-    }
+response = requests.post(
+    "/api/tools/${name}/execute",
+    headers={"Content-Type": "application/json"},
+    json=${body}
 )
-print(result)`;
+data = response.json()
+print(data)`;
 }
 
 function generateJS(name, schema) {
