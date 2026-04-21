@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export default function ExecuteToolPage() {
   const { id } = useParams();

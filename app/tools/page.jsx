@@ -4,7 +4,7 @@ import { ToolCard } from "./components/ToolCard";
 import { SearchBar } from "./components/SearchBar";
 import { FilterSidebar } from "./components/FilterSidebar";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 const PAGE_SIZE = 20;
 
 export default function ToolsPage() {

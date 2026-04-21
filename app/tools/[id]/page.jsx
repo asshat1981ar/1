@@ -5,7 +5,7 @@ import { SchemaViewer } from "./components/SchemaViewer";
 import { CodeExamples } from "./components/CodeExamples";
 import { ExecutionsPanel } from "./components/ExecutionsPanel";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 export default function ToolDetailPage() {
   const { id } = useParams();
