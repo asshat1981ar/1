@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 import traceback
 from typing import Any
 
@@ -364,6 +365,8 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
     # Dispatch to adapter
     adapter = record.get("execution_adapter") or {}
     kind = adapter.get("kind", "http") if isinstance(adapter, dict) else "http"
+    start_ms = int(time.monotonic() * 1000)
+    status = "success"
 
     try:
         if kind == "http":
@@ -380,9 +383,46 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
             result = {"error": f"Unsupported adapter kind: {kind}"}
     except Exception as exc:
         logger.error("Execution error for %s: %s", tool_id, exc)
-        result = {"error": str(exc), "traceback": traceback.format_exc()}
+        result = {"error": str(exc)}
+        status = "error"
+    finally:
+        duration_ms = int(time.monotonic() * 1000) - start_ms
+        error_msg = result.get("error") if isinstance(result, dict) else None
+        database.log_tool_execution(
+            tool_id=tool_id,
+            arguments=arguments,
+            result=result,
+            status=status,
+            duration_ms=duration_ms,
+            error_message=error_msg,
+        )
 
     return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+
+def _substitute_template(template: str, arguments: dict[str, Any]) -> str:
+    """Substitute {key} placeholders in a template string with values from arguments.
+
+    Missing keys are left as-is. Numeric values are stringified.
+    """
+    result = template
+    for key, value in arguments.items():
+        result = result.replace("{" + key + "}", str(value))
+    return result
+
+
+def _build_body_from_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Build a JSON-safe body dict from execution arguments."""
+    import json as _json
+
+    body: dict[str, Any] = {}
+    for key, value in arguments.items():
+        try:
+            _json.dumps(value)  # verify serialisable
+            body[key] = value
+        except (TypeError, ValueError):
+            logger.warning("Argument '%s' is not JSON-serialisable; skipped", key)
+    return body
 
 
 async def _execute_webhook(
@@ -391,12 +431,16 @@ async def _execute_webhook(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute a webhook POST to a URL with JSON body and custom headers."""
-    url_template = adapter.get("url_template", "")
-    if not url_template:
+    raw_url = adapter.get("url_template", "")
+    if not raw_url:
         return {"error": "No url_template in execution_adapter"}
 
-    method = adapter.get("method", "POST").upper()
-    headers: dict[str, str] = dict(adapter.get("headers", {}))
+    # Substitute {key} placeholders in URL and headers
+    url = _substitute_template(raw_url, arguments)
+    headers: dict[str, str] = {
+        k: _substitute_template(v, arguments)
+        for k, v in adapter.get("headers", {}).items()
+    }
     headers.setdefault("Content-Type", "application/json")
 
     auth_info = record.get("auth", {})
@@ -406,28 +450,32 @@ async def _execute_webhook(
             headers["Authorization"] = f"Bearer {value}"
             break
 
-    # Build body from arguments (JSON-serializable values only)
+    method = adapter.get("method", "POST").upper()
+
+    # Build body — prefer body_template with substitution, fall back to raw arguments
     import json as _json
 
-    body: dict[str, Any] = {}
-    for key, value in arguments.items():
+    if adapter.get("body_template"):
+        body_text = _substitute_template(adapter["body_template"], arguments)
         try:
-            _json.dumps(value)  # verify serialisable
-            body[key] = value
+            body: dict[str, Any] = _json.loads(body_text)
         except (TypeError, ValueError):
-            logger.warning("Webhook argument '%s' is not JSON-serialisable; skipped", key)
+            logger.warning("Webhook body_template is not valid JSON; using raw arguments")
+            body = _build_body_from_arguments(arguments)
+    else:
+        body = _build_body_from_arguments(arguments)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         if method == "GET":
-            response = await client.get(url_template, headers=headers)
+            response = await client.get(url, headers=headers)
         elif method == "POST":
-            response = await client.post(url_template, json=body, headers=headers)
+            response = await client.post(url, json=body, headers=headers)
         elif method == "PUT":
-            response = await client.put(url_template, json=body, headers=headers)
+            response = await client.put(url, json=body, headers=headers)
         elif method == "PATCH":
-            response = await client.patch(url_template, json=body, headers=headers)
+            response = await client.patch(url, json=body, headers=headers)
         elif method == "DELETE":
-            response = await client.delete(url_template, headers=headers)
+            response = await client.delete(url, headers=headers)
         else:
             return {"error": f"Unsupported HTTP method: {method}"}
 
@@ -444,25 +492,28 @@ async def _execute_http(
 ) -> dict[str, Any]:
     """Execute an HTTP adapter."""
     method = adapter.get("method", "GET").upper()
-    url_template = adapter.get("url_template", "")
-    if not url_template:
+    raw_url = adapter.get("url_template", "")
+    if not raw_url:
         return {"error": "No url_template in execution_adapter"}
 
-    # Substitute path parameters from arguments
-    url = url_template
+    # Substitute {key} placeholders in URL and headers
+    url = _substitute_template(raw_url, arguments)
+    headers: dict[str, str] = {
+        k: _substitute_template(v, arguments)
+        for k, v in adapter.get("headers", {}).items()
+    }
     body: dict[str, Any] = {}
     params: dict[str, Any] = {}
     for key, value in arguments.items():
         placeholder = "{" + key + "}"
-        if placeholder in url:
-            url = url.replace(placeholder, str(value))
+        if placeholder in raw_url:
+            pass  # already substituted in URL
         elif method == "GET":
             params[key] = value
         else:
             body[key] = value
 
     # Auth
-    headers: dict[str, str] = dict(adapter.get("headers", {}))
     auth_info = record.get("auth", {})
     for env_var in auth_info.get("required_env", []):
         value = os.environ.get(env_var)
@@ -496,15 +547,20 @@ async def _execute_graphql(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute a GraphQL adapter (POST query + variables to url_template)."""
-    url_template = adapter.get("url_template", "")
-    if not url_template:
+    raw_url = adapter.get("url_template", "")
+    if not raw_url:
         return {"error": "No url_template in execution_adapter"}
 
     gql_query = adapter.get("query", "")
     if not gql_query:
         return {"error": "No 'query' field in execution_adapter for graphql kind"}
 
-    headers: dict[str, str] = dict(adapter.get("headers", {}))
+    # Substitute {key} placeholders in URL and headers
+    url = _substitute_template(raw_url, arguments)
+    headers: dict[str, str] = {
+        k: _substitute_template(v, arguments)
+        for k, v in adapter.get("headers", {}).items()
+    }
     headers.setdefault("Content-Type", "application/json")
 
     auth_info = record.get("auth", {})
@@ -516,7 +572,7 @@ async def _execute_graphql(
 
     payload = {"query": gql_query, "variables": _sanitize_graphql_variables(arguments)}
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(url_template, json=payload, headers=headers)
+        response = await client.post(url, json=payload, headers=headers)
 
     try:
         return response.json()
