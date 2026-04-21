@@ -287,6 +287,8 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
             result = _execute_python(record, adapter, arguments)
         elif kind == "subprocess":
             result = _execute_subprocess(record, adapter, arguments)
+        elif kind == "webhook":
+            result = await _execute_webhook(record, adapter, arguments)
         else:
             result = {"error": f"Unsupported adapter kind: {kind}"}
     except Exception as exc:
@@ -294,6 +296,58 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
         result = {"error": str(exc), "traceback": traceback.format_exc()}
 
     return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+
+async def _execute_webhook(
+    record: dict[str, Any],
+    adapter: dict[str, Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a webhook POST to a URL with JSON body and custom headers."""
+    url_template = adapter.get("url_template", "")
+    if not url_template:
+        return {"error": "No url_template in execution_adapter"}
+
+    method = adapter.get("method", "POST").upper()
+    headers: dict[str, str] = dict(adapter.get("headers", {}))
+    headers.setdefault("Content-Type", "application/json")
+
+    auth_info = record.get("auth", {})
+    for env_var in auth_info.get("required_env", []):
+        value = os.environ.get(env_var)
+        if value:
+            headers["Authorization"] = f"Bearer {value}"
+            break
+
+    # Build body from arguments (JSON-serializable values only)
+    import json as _json
+
+    body: dict[str, Any] = {}
+    for key, value in arguments.items():
+        try:
+            _json.dumps(value)  # verify serialisable
+            body[key] = value
+        except (TypeError, ValueError):
+            logger.warning("Webhook argument '%s' is not JSON-serialisable; skipped", key)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        if method == "GET":
+            response = await client.get(url_template, headers=headers)
+        elif method == "POST":
+            response = await client.post(url_template, json=body, headers=headers)
+        elif method == "PUT":
+            response = await client.put(url_template, json=body, headers=headers)
+        elif method == "PATCH":
+            response = await client.patch(url_template, json=body, headers=headers)
+        elif method == "DELETE":
+            response = await client.delete(url_template, headers=headers)
+        else:
+            return {"error": f"Unsupported HTTP method: {method}"}
+
+    try:
+        return response.json()
+    except Exception:
+        return {"status_code": response.status_code, "body": response.text}
 
 
 async def _execute_http(
