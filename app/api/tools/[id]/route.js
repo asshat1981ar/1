@@ -30,7 +30,7 @@ export async function GET(request, { params }) {
 
     // Get tool record
     const toolStmt = database.prepare(`
-      SELECT * FROM tool_records WHERE id = ?
+      SELECT * FROM tools WHERE id = ?
     `);
     const row = toolStmt.get(decodeURIComponent(id));
 
