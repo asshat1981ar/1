@@ -110,6 +110,15 @@ class ReviewQueueItem(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class DestructiveApproval(Base):
+    __tablename__ = "destructive_approvals"
+
+    tool_id = Column(String, primary_key=True)
+    approver = Column(String, nullable=False)
+    reason = Column(Text, nullable=True)
+    approved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # ---------------------------------------------------------------------------
 # Registry CRUD helpers
 # ---------------------------------------------------------------------------
@@ -259,3 +268,55 @@ def reject_review_item(queue_id: int) -> bool:
         row.status = "rejected"
         session.commit()
     return True
+
+
+def approve_destructive_tool(tool_id: str, approver: str, reason: str = "") -> bool:
+    """Record an administrator's approval for a destructive tool.
+
+    Returns True if the approval was recorded (or already existed).
+    Returns False if tool_id is empty.
+    """
+    if not tool_id:
+        return False
+    with get_session() as session:
+        existing = session.get(DestructiveApproval, tool_id)
+        if existing:
+            # Idempotent – update reason and approver on re-approval
+            existing.approver = approver
+            existing.reason = reason
+            existing.approved_at = datetime.now(timezone.utc)
+        else:
+            session.add(
+                DestructiveApproval(
+                    tool_id=tool_id,
+                    approver=approver,
+                    reason=reason,
+                )
+            )
+        session.commit()
+        return True
+
+
+def is_destructive_approved(tool_id: str) -> bool:
+    """Return True if a destructive tool has been administratively approved."""
+    if not tool_id:
+        return False
+    with get_session() as session:
+        row = session.get(DestructiveApproval, tool_id)
+        return row is not None
+
+
+def clear_destructive_approval(tool_id: str) -> bool:
+    """Remove an approval record for a destructive tool.
+
+    Returns True if a record was deleted, False if there was no record.
+    """
+    if not tool_id:
+        return False
+    with get_session() as session:
+        row = session.get(DestructiveApproval, tool_id)
+        if not row:
+            return False
+        session.delete(row)
+        session.commit()
+        return True

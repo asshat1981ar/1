@@ -90,7 +90,7 @@ async def list_tools() -> list[types.Tool]:
             name="execute_tool",
             description=(
                 "Execute a tool from the toolbank by its ID. "
-                "Supports http, graphql, python, and subprocess adapters. "
+                "Supports http, graphql, python, subprocess, and webhook adapters. "
                 "Write and destructive tools require explicit confirmation."
             ),
             inputSchema={
@@ -114,6 +114,30 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["tool_id"],
             },
         ),
+        types.Tool(
+            name="approve_destructive_tool",
+            description=(
+                "Administratively approve a destructive tool for execution. "
+                "Destructive tools (side_effect_level='destructive') are blocked by default. "
+                "Calling this tool with a tool_id grants permission for that tool to run. "
+                "Approvals are persisted in the registry and survive server restarts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "tool_id": {
+                        "type": "string",
+                        "description": "The unique ID of the destructive tool to approve.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional reason for the approval (for audit trail).",
+                        "default": "",
+                    },
+                },
+                "required": ["tool_id"],
+            },
+        ),
     ]
 
 
@@ -123,6 +147,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
         return await _search_tools(arguments)
     if name == "execute_tool":
         return await _execute_tool(arguments)
+    if name == "approve_destructive_tool":
+        return _approve_destructive_tool(arguments)
     return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 
 
@@ -207,6 +233,69 @@ async def _search_tools(args: dict[str, Any]) -> list[types.TextContent]:
 # execute_tool implementation
 # ---------------------------------------------------------------------------
 
+def _approve_destructive_tool(args: dict[str, Any]) -> list[types.TextContent]:
+    """Handle the approve_destructive_tool MCP tool call."""
+    tool_id = args.get("tool_id", "")
+    reason = args.get("reason", "")
+
+    if not tool_id:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps({"error": "tool_id is required"}),
+            )
+        ]
+
+    # Look up the tool to verify it exists and is destructive
+    record = database.get_tool(tool_id)
+    if not record:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps({"error": f"Tool not found: {tool_id}"}),
+            )
+        ]
+
+    if record.get("side_effect_level") != "destructive":
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "error": f"Tool '{tool_id}' is not destructive (side_effect_level="
+                        f"'{record.get('side_effect_level')}'). Only destructive tools "
+                        "require administrative approval."
+                    }
+                ),
+            )
+        ]
+
+    approver = os.environ.get("MCP_ADMIN_EMAIL", "unknown@admin")
+    success = database.approve_destructive_tool(tool_id, approver, reason)
+
+    if success:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps(
+                    {
+                        "status": "approved",
+                        "tool_id": tool_id,
+                        "approver": approver,
+                        "message": f"Destructive tool '{tool_id}' has been approved for execution.",
+                    }
+                ),
+            )
+        ]
+    else:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps({"error": "Failed to record approval."}),
+            )
+        ]
+
+
 async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
     tool_id = args.get("tool_id", "")
     arguments = args.get("arguments", {}) or {}
@@ -241,7 +330,7 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
     side_effect = record.get("side_effect_level", "read")
 
     # Policy enforcement
-    if side_effect == "destructive":
+    if side_effect == "destructive" and not database.is_destructive_approved(tool_id):
         return [
             types.TextContent(
                 type="text",
