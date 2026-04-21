@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { SchemaViewer } from "./components/SchemaViewer";
+import { CodeExamples } from "./components/CodeExamples";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
 
@@ -10,6 +11,7 @@ export default function ToolDetailPage() {
   const [tool, setTool] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState("schema");
 
   useEffect(() => {
     if (!id) return;
@@ -87,13 +89,44 @@ export default function ToolDetailPage() {
         </div>
       )}
 
-      <div className="grid gap-6">
-        {fullRecord.input_schema && (
-          <SchemaViewer title="Input Schema" schema={fullRecord.input_schema} />
-        )}
-        {fullRecord.output_schema && (
-          <SchemaViewer title="Output Schema" schema={fullRecord.output_schema} />
-        )}
+      <div className="mb-6">
+        <div className="flex gap-1 border-b border-zinc-700">
+          <button
+            onClick={() => setActiveTab("schema")}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "schema"
+                ? "text-white border-b-2 border-blue-500"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Schema
+          </button>
+          <button
+            onClick={() => setActiveTab("examples")}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "examples"
+                ? "text-white border-b-2 border-blue-500"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Examples
+          </button>
+        </div>
+        <div className="mt-4">
+          {activeTab === "schema" && (
+            <div className="grid gap-6">
+              {fullRecord.input_schema && (
+                <SchemaViewer title="Input Schema" schema={fullRecord.input_schema} />
+              )}
+              {fullRecord.output_schema && (
+                <SchemaViewer title="Output Schema" schema={fullRecord.output_schema} />
+              )}
+            </div>
+          )}
+          {activeTab === "examples" && (
+            <CodeExamples toolName={`${tool.namespace}.${tool.name}`} schema={fullRecord.input_schema} />
+          )}
+        </div>
       </div>
 
       {fullRecord.auth && (
