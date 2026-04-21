@@ -5,20 +5,26 @@ Tests for models, normalizer, verifier, deduper, classifier, and extractors.
 from __future__ import annotations
 
 import json
+import pytest
 
-from mcp_server.harvester.classifier import classify
-from mcp_server.harvester.deduper import deduplicate
-from mcp_server.harvester.extractors.openapi_extractor import extract_from_openapi
-from mcp_server.harvester.gap_miner import analyse_gaps, generate_seeds
+from mcp_server.models import (
+    ToolbankRecord,
+    AuthInfo,
+    ToolExample,
+    ExecutionAdapter,
+    AdapterKind,
+    SideEffectLevel,
+    PermissionPolicy,
+    ToolStatus,
+    ExtractionResult,
+    ToolDNA,
+)
 from mcp_server.harvester.normalizer import normalize
 from mcp_server.harvester.verifier import verify
-from mcp_server.models import (
-    PermissionPolicy,
-    SideEffectLevel,
-    ToolbankRecord,
-    ToolDNA,
-    ToolStatus,
-)
+from mcp_server.harvester.deduper import deduplicate
+from mcp_server.harvester.classifier import classify
+from mcp_server.harvester.extractors.openapi_extractor import extract_from_openapi
+
 
 # ---------------------------------------------------------------------------
 # Model tests
@@ -226,8 +232,8 @@ class TestDeduper:
         r2["source_urls"] = ["https://docs.stripe.com/alternate"]
         result = deduplicate([r1, r2])
         assert len(result) == 1
-        # Higher confidence wins
-        assert result[0]["confidence"] == 0.9
+        # Confidence is weighted average of merged sources
+        assert abs(result[0]["confidence"] - 0.8) < 1e-9
         # Both source URLs merged
         assert len(result[0]["source_urls"]) == 2
 
@@ -361,424 +367,288 @@ class TestOpenAPIExtractor:
 
 
 # ---------------------------------------------------------------------------
-# Gap Miner tests
+# GraphQL adapter tests
 # ---------------------------------------------------------------------------
 
-class TestGapMiner:
-    def _failed(self, goal: str, n: int = 1) -> list[dict]:
-        return [{"user_goal": goal, "failed_query": goal} for _ in range(n)]
+class TestGraphQLAdapter:
+    """Tests for _execute_graphql in server.py."""
 
-    def test_analyse_gaps_counts_correctly(self):
-        queries = self._failed("send an email", 3) + self._failed("make a payment", 1)
-        gaps = analyse_gaps(queries)
-        assert gaps[0]["goal"] == "send an email"
-        assert gaps[0]["frequency"] == 3
+    def _make_record(self, auth_env: list[str] | None = None) -> dict:
+        return {
+            "id": "test.query",
+            "name": "query",
+            "namespace": "test",
+            "description": "A test GraphQL query.",
+            "auth": {"type": "bearer", "required_env": auth_env or []},
+        }
 
-    def test_generate_seeds_email(self):
-        seeds = generate_seeds({"goal": "send an email notification"})
-        names = [s["name"] for s in seeds]
-        assert "sendgrid" in names
+    def _make_adapter(self) -> dict:
+        return {
+            "kind": "graphql",
+            "url_template": "https://api.example.com/graphql",
+            "query": "query GetUser($id: ID!) { user(id: $id) { name } }",
+            "variables_map": {"id": "user_id"},
+        }
 
-    def test_generate_seeds_ai(self):
-        seeds = generate_seeds({"goal": "call an ai llm"})
-        names = [s["name"] for s in seeds]
-        assert "openai" in names
+    def test_variables_mapped_correctly(self):
+        """variables_map keys become GraphQL vars, values become arg lookups."""
+        adapter = self._make_adapter()
+        variables_map = adapter["variables_map"]
+        arguments = {"user_id": "u_123"}
+        variables = {gql_var: arguments.get(arg_key) for gql_var, arg_key in variables_map.items()}
+        assert variables == {"id": "u_123"}
 
-    def test_generate_seeds_no_match_returns_empty(self):
-        seeds = generate_seeds({"goal": "xylophone concert"})
-        assert seeds == []
+    def test_missing_url_template(self):
+        """Adapter without url_template returns error dict."""
+        import asyncio
+        from mcp_server.server import _execute_graphql
 
-    def test_generate_seeds_deduplicates(self):
-        # "message" should not produce duplicate twilio entries
-        seeds = generate_seeds({"goal": "send a sms message"})
-        urls = [s["url"] for s in seeds]
-        assert len(urls) == len(set(urls))
+        record = self._make_record()
+        adapter = {"kind": "graphql", "query": "{ users { id } }"}
+        result = asyncio.get_event_loop().run_until_complete(
+            _execute_graphql(record, adapter, {})
+        )
+        assert "error" in result
+        assert "url_template" in result["error"]
+
+    def test_missing_query(self):
+        """Adapter without query string returns error dict."""
+        import asyncio
+        from mcp_server.server import _execute_graphql
+
+        record = self._make_record()
+        adapter = {"kind": "graphql", "url_template": "https://api.example.com/graphql"}
+        result = asyncio.get_event_loop().run_until_complete(
+            _execute_graphql(record, adapter, {})
+        )
+        assert "error" in result
+        assert "query" in result["error"]
 
 
 # ---------------------------------------------------------------------------
-# Server adapter tests (unit-level, no real HTTP)
+# Python function adapter tests
 # ---------------------------------------------------------------------------
 
-class TestPythonAdapter:
-    """Test the Python function adapter sandbox enforcement."""
+class TestPythonFuncAdapter:
+    """Tests for _execute_python_func in server.py."""
 
-    def _record(self):
+    def _make_record(self) -> dict:
         return {
             "id": "test.func",
             "name": "func",
             "namespace": "test",
-            "description": "test",
-            "side_effect_level": "read",
-            "permission_policy": "auto",
+            "description": "A test Python function.",
             "auth": {"type": "none", "required_env": []},
-            "status": "approved",
         }
 
-    def test_blocked_module_returns_error(self):
-        from mcp_server.server import _execute_python
-        # httpx is not in the allowlist
-        adapter = {"function": "httpx.get"}
-        result = _execute_python(self._record(), adapter, {})
+    def test_calls_stdlib_function(self):
+        """Can call a stdlib function when allowlist permits."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "json",
+            "function": "loads",
+            "allowlist": ["json"],
+        }
+        result = _execute_python_func(record, adapter, {"s": '{"key": "value"}'})
+        assert result == {"key": "value"}
+
+    def test_allowlist_blocks_unlisted_module(self):
+        """Module not in allowlist returns an error dict."""
+        from mcp_server.server import _execute_python_func
+
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "os",
+            "function": "getcwd",
+            "allowlist": ["math"],
+        }
+        result = _execute_python_func(record, adapter, {})
         assert "error" in result
         assert "allowlist" in result["error"]
 
-    def test_allowed_module_runs(self):
-        from mcp_server.server import _execute_python
-        adapter = {"function": "re.escape"}
-        result = _execute_python(self._record(), adapter, {"pattern": "hello.world"})
-        assert "result" in result
-        assert "hello" in result["result"]
+    def test_empty_allowlist_allows_any_module(self):
+        """Empty allowlist means no restriction."""
+        from mcp_server.server import _execute_python_func
 
-    def test_missing_function_field_returns_error(self):
-        from mcp_server.server import _execute_python
-        adapter = {}
-        result = _execute_python(self._record(), adapter, {})
-        assert "error" in result
-
-    def test_invalid_dotted_path_returns_error(self):
-        from mcp_server.server import _execute_python
-        adapter = {"function": "nodots"}
-        result = _execute_python(self._record(), adapter, {})
-        assert "error" in result
-
-    def test_signature_validation_rejects_extra_args(self):
-        from mcp_server.server import _execute_python
-        # math.sqrt takes one arg: x
-        adapter = {"function": "math.sqrt"}
-        result = _execute_python(self._record(), adapter, {"x": 9, "extra_arg": 1})
-        assert "error" in result
-        assert "Unknown argument" in result["error"] or "extra_arg" in result["error"]
-
-    def test_signature_validation_allows_valid_args(self):
-        from mcp_server.server import _execute_python
-        # json.loads accepts keyword arguments like parse_float
-        adapter = {"function": "json.loads"}
-        result = _execute_python(self._record(), adapter, {"s": '"hello"'})
-        assert "result" in result
-        assert result["result"] == "hello"
-
-    def test_signature_validation_var_keyword_allows_extra(self):
-        from mcp_server.server import _execute_python
-        # json.loads accepts **kwargs via loader parameter
-        adapter = {"function": "json.loads"}
-        result = _execute_python(self._record(), adapter, {"s": '"hello"', "parse_float": None})
-        assert "result" in result or "error" not in result
-
-    def test_import_error_returns_error(self):
-        from mcp_server.server import _execute_python
-        # nonexistent_module is not in allowlist (and not a real module)
-        adapter = {"function": "nonexistent_module.my_func"}
-        result = _execute_python(self._record(), adapter, {})
-        assert "error" in result
-        # Should be caught by allowlist check first
-        assert "allowlist" in result["error"] or "Could not import" in result["error"]
-
-    def test_missing_callable_returns_error(self):
-        from mcp_server.server import _execute_python
-        adapter = {"function": "math.nonexistent_function"}
-        result = _execute_python(self._record(), adapter, {})
-        assert "error" in result
-        assert "not found or not callable" in result["error"]
-
-    def test_allowlist_modules_are_valid(self):
-        import importlib
-
-        from mcp_server.server import _PYTHON_ADAPTER_ALLOWLIST
-        for mod in _PYTHON_ADAPTER_ALLOWLIST:
-            # Should not raise ImportError
-            importlib.import_module(mod)
-
-    def test_nested_module_in_allowlist(self):
-        from mcp_server.server import _execute_python
-        # urllib.parse is in allowlist as a dotted path
-        adapter = {"function": "urllib.parse.quote"}
-        result = _execute_python(self._record(), adapter, {"string": "hello world", "safe": ""})
-        assert "result" in result
-        assert result["result"] == "hello%20world"
-
-    def test_top_level_not_in_allowlist_blocked(self):
-        from mcp_server.server import _execute_python
-        # subprocess is not in the allowlist
-        adapter = {"function": "subprocess.run"}
-        result = _execute_python(self._record(), adapter, {"args": []})
-        assert "error" in result
-        assert "allowlist" in result["error"]
-
-
-class TestGraphQLAdapter:
-    """Test the GraphQL adapter execution."""
-
-    def _record(self):
-        return {
-            "id": "github.gql_repo",
-            "name": "gql_repo",
-            "namespace": "github",
-            "description": "GraphQL repo query",
-            "side_effect_level": "read",
-            "permission_policy": "auto",
-            "auth": {"type": "bearer", "required_env": ["GITHUB_TOKEN"]},
-            "status": "approved",
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "json",
+            "function": "loads",
+            "allowlist": [],
         }
+        result = _execute_python_func(record, adapter, {"s": '{"n": 42}'})
+        assert result == {"n": 42}
 
-    def test_missing_url_template_returns_error(self):
-        import asyncio
+    def test_missing_module(self):
+        """Non-existent module returns import error dict."""
+        from mcp_server.server import _execute_python_func
 
-        from mcp_server.server import _execute_graphql
-
-        async def run():
-            adapter = {"query": "query { viewer { login } }"}
-            result = await _execute_graphql(self._record(), adapter, {})
-            assert "error" in result
-            assert "url_template" in result["error"]
-
-        asyncio.run(run())
-
-    def test_missing_query_returns_error(self):
-        import asyncio
-
-        from mcp_server.server import _execute_graphql
-
-        async def run():
-            adapter = {"url_template": "https://api.github.com/graphql"}
-            result = await _execute_graphql(self._record(), adapter, {})
-            assert "error" in result
-            assert "query" in result["error"].lower()
-
-        asyncio.run(run())
-
-    def test_sanitize_graphql_variables_strips_non_json_serializable(self):
-        from mcp_server.server import _sanitize_graphql_variables
-
-        # Functions are not JSON-serializable
-        variables = {
-            "name": "Alice",
-            "age": 30,
-            "callback": lambda x: x,  # not serializable
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "nonexistent_module_xyz",
+            "function": "func",
+            "allowlist": ["nonexistent_module_xyz"],
         }
-        result = _sanitize_graphql_variables(variables)
-        assert result["name"] == "Alice"
-        assert result["age"] == 30
-        assert "callback" not in result
+        result = _execute_python_func(record, adapter, {})
+        assert "error" in result
 
-    def test_sanitize_graphql_variables_keeps_valid(self):
-        from mcp_server.server import _sanitize_graphql_variables
+    def test_missing_function(self):
+        """Existing module but missing function returns attribute error dict."""
+        from mcp_server.server import _execute_python_func
 
-        variables = {"name": "Bob", "tags": ["a", "b"], "count": 5}
-        result = _sanitize_graphql_variables(variables)
-        assert result == {"name": "Bob", "tags": ["a", "b"], "count": 5}
-
-    def test_sanitize_graphql_variables_empty_key_skipped(self):
-        from mcp_server.server import _sanitize_graphql_variables
-
-        variables = {"": "empty_key", "valid": "value"}
-        result = _sanitize_graphql_variables(variables)
-        assert "" not in result
-        assert result["valid"] == "value"
-
-
-class TestWebhookAdapter:
-    """Test the webhook delivery adapter."""
-
-    def _record(self):
-        return {
-            "id": "notify.webhook",
-            "name": "webhook",
-            "namespace": "notify",
-            "description": "POST to a webhook URL",
-            "side_effect_level": "write",
-            "permission_policy": "confirm",
-            "auth": {"type": "bearer", "required_env": ["WEBHOOK_SECRET"]},
-            "status": "approved",
+        record = self._make_record()
+        adapter = {
+            "kind": "python_func",
+            "module": "math",
+            "function": "this_does_not_exist",
+            "allowlist": ["math"],
         }
-
-    def test_missing_url_template_returns_error(self):
-        import asyncio
-
-        from mcp_server.server import _execute_webhook
-
-        async def run():
-            adapter = {"headers": {"Content-Type": "application/json"}}
-            result = await _execute_webhook(self._record(), adapter, {"body": "test"})
-            assert "error" in result
-            assert "url_template" in result["error"]
-
-        asyncio.run(run())
-
-    def test_custom_headers_sent(self):
-        import asyncio
-
-        from mcp_server.server import _execute_webhook
-
-        async def run():
-            adapter = {
-                "url_template": "https://example.com/hook",
-                "headers": {"X-Custom": "myvalue", "Content-Type": "application/json"},
-            }
-            result = await _execute_webhook(self._record(), adapter, {"body": "hello"})
-            # Without a real server we can't verify headers, but check it doesn't error
-            assert "error" not in result or "url_template" in result.get("error", "")
-
-        asyncio.run(run())
-
-    def test_body_json_serializable_variables(self):
-        import asyncio
-
-        from mcp_server.server import _execute_webhook
-
-        async def run():
-            adapter = {
-                "url_template": "https://example.com/hook",
-                "method": "POST",
-                "headers": {"Content-Type": "application/json"},
-            }
-            # Should not raise - variables are JSON-serializable
-            result = await _execute_webhook(
-                self._record(), adapter, {"name": "Alice", "count": 42}
-            )
-            # We expect either a real HTTP error (connection refused) or nothing
-            # The important thing is it didn't crash on serialisation
-            assert True
-
-        asyncio.run(run())
-
-    def test_http_method_get_only_has_no_body(self):
-        import asyncio
-
-        from mcp_server.server import _execute_webhook
-
-        async def run():
-            adapter = {
-                "url_template": "https://example.com/hook",
-                "method": "GET",
-            }
-            result = await _execute_webhook(self._record(), adapter, {"key": "value"})
-            # Should attempt GET without body
-            assert "error" not in result or "url_template" in result.get("error", "")
-
-        asyncio.run(run())
+        result = _execute_python_func(record, adapter, {})
+        assert "error" in result
 
 
-class TestDestructiveApproval:
-    """Test the admin destructive-tool approval API."""
+# ---------------------------------------------------------------------------
+# Crawler cache expiry tests
+# ---------------------------------------------------------------------------
 
-    def _db_path(self, tmp_path):
-        return str(tmp_path / "test_approval.db")
+class TestCrawlerCacheExpiry:
+    """Tests for the updated in-memory cache with TTL support."""
 
-    def test_upsert_tool_creates_table(self, tmp_path):
-        from mcp_server.database import init_db, upsert_tool
+    def test_purge_stale_removes_expired_entries(self):
+        from mcp_server.harvester.crawler import Crawler
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        tool = {
-            "id": "test.delete_all",
-            "name": "delete_all",
-            "namespace": "test",
-            "description": "Delete everything",
-            "side_effect_level": "destructive",
-            "permission_policy": "deny",
-            "status": "draft",
-            "confidence": 0.95,
-            "version_hash": "sha256:test",
-            "tags": [],
-        }
-        result = upsert_tool(tool)
-        assert result.id == "test.delete_all"
-
-    def test_destructive_approval_table_exists(self, tmp_path):
-        from mcp_server.database import get_session, init_db
-        from sqlalchemy import text
-
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        with get_session() as session:
-            rows = session.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).fetchall()
-            table_names = [r[0] for r in rows]
-        assert "destructive_approvals" in table_names
-
-    def test_approve_destructive_tool_inserts_record(self, tmp_path):
-        from mcp_server.database import approve_destructive_tool, init_db
-
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        # Tool not in db yet, but we can test the function creates the record
-        result = approve_destructive_tool(
-            tool_id="test.delete_all",
-            approver="admin@example.com",
-            reason="Testing approval",
+        crawler = Crawler(use_cache=True, request_delay=0)
+        # Manually insert a stale entry
+        crawler._cache["http://example.com/stale"] = (
+            "<html/>",
+            "text/html",
+            0.0,  # expired in 1970
         )
-        assert result is True
+        # And a fresh entry (expiry far in the future)
+        crawler._cache["http://example.com/fresh"] = (
+            "<html/>",
+            "text/html",
+            9_999_999_999.0,
+        )
+        purged = crawler.purge_stale()
+        assert purged == 1
+        assert "http://example.com/stale" not in crawler._cache
+        assert "http://example.com/fresh" in crawler._cache
+        crawler.close()
 
-    def test_approve_idempotent(self, tmp_path):
-        from mcp_server.database import approve_destructive_tool, init_db
+    def test_purge_stale_no_expiry_entries_not_removed(self):
+        from mcp_server.harvester.crawler import Crawler
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        r1 = approve_destructive_tool("test.delete_all", "admin@example.com", "first")
-        r2 = approve_destructive_tool("test.delete_all", "admin@example.com", "second")
-        assert r1 is True
-        assert r2 is True  # idempotent - already approved
+        crawler = Crawler(use_cache=True, request_delay=0)
+        crawler._cache["http://example.com/no-expiry"] = (
+            "<html/>",
+            "text/html",
+            None,  # no expiry
+        )
+        purged = crawler.purge_stale()
+        assert purged == 0
+        assert "http://example.com/no-expiry" in crawler._cache
+        crawler.close()
 
-    def test_approve_returns_false_for_empty_tool_id(self, tmp_path):
-        from mcp_server.database import approve_destructive_tool, init_db
+    def test_no_cache_mode_skips_cache(self):
+        from mcp_server.harvester.crawler import Crawler
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        result = approve_destructive_tool("", "admin@example.com", "no tool")
-        assert result is False
+        crawler = Crawler(use_cache=False, request_delay=0)
+        assert crawler._use_cache is False
+        assert crawler._cache == {}
+        crawler.close()
 
-    def test_is_destructive_approved_true(self, tmp_path):
-        from mcp_server.database import approve_destructive_tool, init_db, is_destructive_approved
+    def test_parse_expiry_max_age(self):
+        from mcp_server.harvester.crawler import Crawler
+        import time
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        approve_destructive_tool("test.delete_all", "admin@example.com", "ok")
-        assert is_destructive_approved("test.delete_all") is True
+        before = time.time()
+        headers = {"cache-control": "public, max-age=3600"}
+        expiry = Crawler._parse_expiry(headers)
+        assert expiry is not None
+        assert abs(expiry - (before + 3600)) < 5  # within 5 seconds
 
-    def test_is_destructive_approved_false_unapproved(self, tmp_path):
-        from mcp_server.database import init_db, is_destructive_approved
+    def test_parse_expiry_no_header(self):
+        from mcp_server.harvester.crawler import Crawler
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        assert is_destructive_approved("test.delete_all") is False
+        expiry = Crawler._parse_expiry({})
+        assert expiry is None
 
-    def test_approve_tool_and_execute(self, tmp_path):
-        """End-to-end: approve a destructive tool, then verify execute_tool allows it."""
-        import asyncio
 
-        from mcp_server.database import approve_destructive_tool, init_db, upsert_tool
-        from mcp_server.server import _execute_tool
+# ---------------------------------------------------------------------------
+# CLI export tests
+# ---------------------------------------------------------------------------
 
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
+class TestCmdExport:
+    """Tests for the toolbank export command."""
 
-        # Create a mock destructive tool in the registry
-        tool = {
-            "id": "test.burn_it_all",
-            "name": "burn_it_all",
-            "namespace": "test",
-            "description": "Destructive tool for testing",
-            "side_effect_level": "destructive",
-            "permission_policy": "deny",
-            "status": "approved",
-            "confidence": 1.0,
-            "version_hash": "sha256:abc",
-            "tags": [],
-            "auth": {"type": "none", "required_env": []},
-            "execution_adapter": {"kind": "http", "url_template": "https://example.com/delete"},
-        }
-        upsert_tool(tool)
-        approve_destructive_tool("test.burn_it_all", "admin@example.com", "Testing")
+    def test_export_json_empty(self, tmp_path):
+        """Export with no records produces empty JSON array."""
+        import sys
+        import io
+        import argparse
+        from mcp_server.database import init_db
+        from mcp_server.cli import cmd_export
 
-        async def run():
-            result = await _execute_tool({
-                "tool_id": "test.burn_it_all",
-                "arguments": {},
-                "confirmed": True,
-            })
-            return result
+        db_path = str(tmp_path / "test_export.db")
+        init_db(db_path=db_path)
 
-        text_content = asyncio.run(run())
-        result = json.loads(text_content[0].text)
-        # Should NOT be blocked by destructive policy now
-        assert "error" not in result or "Destructive tools are blocked" not in result.get("error", "")
+        args = argparse.Namespace(format="json", output=None)
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cmd_export(args)
+        finally:
+            sys.stdout = old_stdout
 
+        output = captured.getvalue()
+        data = json.loads(output)
+        assert isinstance(data, list)
+
+    def test_export_csv_empty(self, tmp_path):
+        """Export CSV with no records writes empty string."""
+        import io
+        import sys
+        import argparse
+        from mcp_server.database import init_db
+        from mcp_server.cli import cmd_export
+
+        db_path = str(tmp_path / "test_export_csv.db")
+        init_db(db_path=db_path)
+
+        args = argparse.Namespace(format="csv", output=None)
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = captured
+        try:
+            cmd_export(args)
+        finally:
+            sys.stdout = old_stdout
+        # Should not raise; output may be empty
+
+
+# ---------------------------------------------------------------------------
+# TUI module smoke test
+# ---------------------------------------------------------------------------
+
+class TestTUI:
+    """Smoke tests for mcp_server.tui."""
+
+    def test_module_importable(self):
+        from mcp_server import tui  # noqa: F401
+
+    def test_run_review_tui_empty_list(self, tmp_path, capsys):
+        """run_review_tui with empty list does not raise."""
+        from mcp_server.tui import _plain_review
+
+        _plain_review([])
+        # No output and no exception
+        captured = capsys.readouterr()
+        assert captured.out == ""

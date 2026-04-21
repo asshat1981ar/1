@@ -81,12 +81,61 @@ def cmd_list(args: argparse.Namespace) -> None:
 
 
 def cmd_review(args: argparse.Namespace) -> None:
-    from mcp_server.database import init_db
-
-    init_db()
+    from mcp_server.database import get_review_queue, init_db
     from mcp_server.tui import run_review_tui
 
-    run_review_tui()
+    init_db()
+    items = get_review_queue()
+    if not items:
+        print("Review queue is empty.")
+        return
+
+    run_review_tui(items)
+
+
+def cmd_export(args: argparse.Namespace) -> None:
+    """Export approved tool records to JSON or CSV.
+
+    Args:
+        args: Parsed CLI arguments with ``format`` and ``output`` attributes.
+    """
+    import csv
+
+    from mcp_server.database import init_db, list_tools
+
+    init_db()
+    records = list_tools(status="approved")
+
+    output = (
+        open(args.output, "w", newline="", encoding="utf-8") if args.output else sys.stdout
+    )
+    try:
+        if args.format == "csv":
+            if not records:
+                output.write("")
+                return
+            fieldnames = [
+                "id",
+                "name",
+                "namespace",
+                "description",
+                "side_effect_level",
+                "transport",
+                "confidence",
+                "status",
+                "tags",
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for rec in records:
+                row = {k: rec.get(k, "") for k in fieldnames}
+                row["tags"] = ",".join(rec.get("tags", []))
+                writer.writerow(row)
+        else:
+            output.write(json.dumps(records, indent=2))
+    finally:
+        if args.output:
+            output.close()
 
 
 def cmd_gaps(args: argparse.Namespace) -> None:
@@ -108,45 +157,7 @@ def cmd_gaps(args: argparse.Namespace) -> None:
             print(f"         → Suggested seed: {seed['name']} ({seed['url']})")
 
 
-def cmd_export(args: argparse.Namespace) -> None:
-    import csv
-    import io
-
-    from mcp_server.database import init_db, list_tools
-
-    init_db()
-    records = list_tools(status=args.status or None, namespace=args.namespace or None)
-    if not records:
-        print("No records found.")
-        return
-
-    output_path = Path(args.output) if args.output else None
-
-    if args.format == "csv":
-        fieldnames = [
-            "id", "name", "namespace", "description", "source_type",
-            "transport", "side_effect_level", "permission_policy",
-            "status", "confidence", "tags",
-        ]
-        buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        for rec in records:
-            row = {k: rec.get(k, "") for k in fieldnames}
-            row["tags"] = ",".join(rec.get("tags", []))
-            writer.writerow(row)
-        content = buf.getvalue()
-    else:
-        content = json.dumps(records, indent=2)
-
-    if output_path:
-        output_path.write_text(content, encoding="utf-8")
-        print(f"Exported {len(records)} records to {output_path}")
-    else:
-        print(content)
-
-
-
+def cmd_server(_args: argparse.Namespace) -> None:
     from mcp_server.server import main
 
     asyncio.run(main())
@@ -178,15 +189,13 @@ def main():
     # gaps
     sub.add_parser("gaps", help="Show capability gaps from failed queries")
 
-    # export
-    p_export = sub.add_parser("export", help="Export tool records to JSON or CSV")
-    p_export.add_argument("--format", choices=["json", "csv"], default="json")
-    p_export.add_argument("--output", help="Output file path (default: stdout)")
-    p_export.add_argument("--status", choices=["draft", "verified", "approved", "deprecated"])
-    p_export.add_argument("--namespace")
-
     # server
     sub.add_parser("server", help="Start the MCP server (stdio transport)")
+
+    # export
+    p_export = sub.add_parser("export", help="Export approved tool records to JSON or CSV")
+    p_export.add_argument("--format", choices=["json", "csv"], default="json")
+    p_export.add_argument("--output", default=None, help="Output file path (default: stdout)")
 
     args = parser.parse_args()
     dispatch = {
@@ -194,8 +203,8 @@ def main():
         "list": cmd_list,
         "review": cmd_review,
         "gaps": cmd_gaps,
-        "export": cmd_export,
         "server": cmd_server,
+        "export": cmd_export,
     }
     if args.command not in dispatch:
         parser.print_help()

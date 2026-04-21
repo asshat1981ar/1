@@ -377,6 +377,10 @@ async def _execute_tool(args: dict[str, Any]) -> list[types.TextContent]:
             result = _execute_python(record, adapter, arguments)
         elif kind == "subprocess":
             result = _execute_subprocess(record, adapter, arguments)
+        elif kind == "graphql":
+            result = await _execute_graphql(record, adapter, arguments)
+        elif kind == "python_func":
+            result = _execute_python_func(record, adapter, arguments)
         elif kind == "webhook":
             result = await _execute_webhook(record, adapter, arguments)
         else:
@@ -736,8 +740,86 @@ def _execute_subprocess(
         return {"error": f"Command not found: {command}"}
 
 
-# ---------------------------------------------------------------------------
-# Internal ingest endpoint (used by harvester, not exposed to MCP clients)
+async def _execute_graphql(
+    record: dict[str, Any],
+    adapter: dict[str, Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a GraphQL adapter by POSTing query + variables to the endpoint."""
+    url = adapter.get("url_template", "")
+    if not url:
+        return {"error": "No url_template in execution_adapter"}
+
+    query = adapter.get("query", "")
+    if not query:
+        return {"error": "No query in execution_adapter"}
+
+    variables_map: dict[str, str] = adapter.get("variables_map", {})
+    variables = {gql_var: arguments.get(arg_key) for gql_var, arg_key in variables_map.items()}
+
+    headers: dict[str, str] = dict(adapter.get("headers", {}))
+    auth_info = record.get("auth", {})
+    for env_var in auth_info.get("required_env", []):
+        value = os.environ.get(env_var)
+        if value:
+            headers["Authorization"] = f"Bearer {value}"
+            break
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            url,
+            json={"query": query, "variables": variables},
+            headers=headers,
+        )
+
+    try:
+        return response.json()
+    except Exception:
+        return {"status_code": response.status_code, "body": response.text}
+
+
+def _execute_python_func(
+    record: dict[str, Any],
+    adapter: dict[str, Any],
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a Python function adapter via dynamic import."""
+    import importlib
+
+    module_path: str = adapter.get("module", "")
+    func_name: str = adapter.get("function", "")
+    allowlist: list[str] = adapter.get("allowlist", [])
+
+    if not module_path:
+        return {"error": "No module in execution_adapter"}
+    if not func_name:
+        return {"error": "No function in execution_adapter"}
+
+    if allowlist and not any(module_path.startswith(prefix) for prefix in allowlist):
+        return {"error": f"Module not in allowlist: {module_path}"}
+
+    if not allowlist:
+        logger.warning(
+            "python_func adapter for '%s.%s' has an empty allowlist — "
+            "any module may be imported; configure allowlist to restrict execution.",
+            module_path,
+            func_name,
+        )
+
+    try:
+        mod = importlib.import_module(module_path)
+        func = getattr(mod, func_name)
+        return func(**arguments)
+    except ImportError as exc:
+        return {"error": f"Cannot import module '{module_path}': {exc}"}
+    except AttributeError:
+        return {"error": f"Function '{func_name}' not found in module '{module_path}'"}
+    except Exception as exc:
+        logger.error("python_func execution error: %s", exc)
+        return {"error": str(exc), "traceback": traceback.format_exc()}
+
+
+
 # ---------------------------------------------------------------------------
 
 def ingest_tool_candidate(candidate_json: dict[str, Any]) -> dict[str, Any]:

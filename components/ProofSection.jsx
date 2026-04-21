@@ -1,106 +1,75 @@
 "use client";
-import { motion } from "framer-motion";
 
-const SOURCES = [
-  {
-    kind: "OpenAPI / REST",
-    icon: "🔌",
-    description:
-      "Parses OpenAPI 2.x / 3.x specs. Extracts every endpoint as a callable tool with input/output schemas.",
-    examples: ["Stripe", "GitHub", "Twilio"],
-  },
-  {
-    kind: "GraphQL",
-    icon: "◈",
-    description:
-      "Runs schema introspection and maps every Query, Mutation, and Subscription to a typed ToolbankRecord.",
-    examples: ["Shopify", "GitHub v4", "SpaceX"],
-  },
-  {
-    kind: "MCP Servers",
-    icon: "⚡",
-    description:
-      "Scrapes public MCP server manifests from registries like smithery.ai and mcp.so.",
-    examples: ["smithery.ai", "mcp.so", "Custom servers"],
-  },
-  {
-    kind: "Docs Sites",
-    icon: "📄",
-    description:
-      "Crawls developer documentation with robots.txt respect, classifying and extracting tool descriptions.",
-    examples: ["ReadTheDocs", "Docusaurus", "GitBook"],
-  },
-];
+import { motion, useInView } from "framer-motion";
+import { useRef } from "react";
+import { CASE_STUDIES, LOGOS, METRICS } from "../lib/proof-data";
 
-const STATS = [
-  { value: "4", label: "Adapter types" },
-  { value: "∞", label: "Sources supported" },
-  { value: "100%", label: "robots.txt compliant" },
-  { value: "1", label: "Unified registry" },
-];
+function MetricCard({ value, label }) {
+  const ref = useRef(null);
+  const inView = useInView(ref, { once: true, margin: "-80px" });
+
+  return (
+    <motion.div
+      ref={ref}
+      initial={{ opacity: 0, y: 20 }}
+      animate={inView ? { opacity: 1, y: 0 } : {}}
+      transition={{ duration: 0.5 }}
+      className="flex flex-col items-center gap-1"
+    >
+      <span className="text-4xl font-extrabold text-white">{value}</span>
+      <span className="text-sm text-white/60 text-center">{label}</span>
+    </motion.div>
+  );
+}
 
 export default function ProofSection() {
   return (
-    <section id="sources" className="bg-gray-900 text-white py-20 px-6">
-      <div className="max-w-5xl mx-auto">
-        <motion.h2
-          initial={{ opacity: 0, y: -20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.7 }}
-          className="text-4xl font-bold text-center mb-4"
-        >
-          Supported Sources
-        </motion.h2>
-        <p className="text-center text-gray-400 mb-12 max-w-xl mx-auto">
-          ToolBank harvests from any source that exposes structured or
-          semi-structured tool definitions.
-        </p>
+    <section className="bg-black text-white py-24 px-6">
+      <div className="max-w-5xl mx-auto flex flex-col gap-20">
+        {/* Heading */}
+        <h2 className="text-4xl md:text-5xl font-extrabold text-center">
+          Results, not promises.
+        </h2>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-16">
-          {SOURCES.map((src, i) => (
+        {/* Metrics row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
+          {METRICS.map((m) => (
+            <MetricCard key={m.label} value={m.value} label={m.label} />
+          ))}
+        </div>
+
+        {/* Case studies */}
+        <div className="flex flex-col gap-6">
+          {CASE_STUDIES.map((cs, i) => (
             <motion.div
-              key={src.kind}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
+              key={cs.client}
+              initial={{ opacity: 0, x: i % 2 === 0 ? -30 : 30 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: "-60px" }}
               transition={{ duration: 0.5, delay: i * 0.1 }}
-              className="bg-gray-800 rounded-2xl p-6 flex flex-col gap-3 border border-white/5 hover:border-indigo-500/40 transition-colors"
+              className="bg-zinc-900 rounded-2xl p-8 flex flex-col gap-3"
             >
-              <div className="text-3xl">{src.icon}</div>
-              <h3 className="text-xl font-semibold">{src.kind}</h3>
-              <p className="text-gray-400 text-sm leading-relaxed">{src.description}</p>
-              <div className="flex gap-2 flex-wrap mt-auto">
-                {src.examples.map((ex) => (
-                  <span
-                    key={ex}
-                    className="text-xs bg-white/10 text-gray-300 px-2 py-1 rounded-full"
-                  >
-                    {ex}
-                  </span>
-                ))}
-              </div>
+              <span className="text-sm font-semibold text-white/50 uppercase tracking-widest">
+                {cs.client}
+              </span>
+              <p className="text-2xl font-bold text-white">{cs.result}</p>
+              <p className="text-white/70 leading-relaxed">{cs.description}</p>
             </motion.div>
           ))}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 text-center">
-          {STATS.map((stat, i) => (
-            <motion.div
-              key={stat.label}
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: i * 0.1 }}
-              className="bg-gray-800 rounded-2xl py-8 border border-white/5"
+        {/* Logo strip */}
+        <div className="flex flex-wrap justify-center gap-4">
+          {LOGOS.map((logo) => (
+            <span
+              key={logo.name}
+              className="px-4 py-2 rounded-full border border-white/20 text-white/60 text-sm font-medium"
             >
-              <p className="text-4xl font-bold text-indigo-400">{stat.value}</p>
-              <p className="text-sm text-gray-400 mt-2">{stat.label}</p>
-            </motion.div>
+              {logo.name}
+            </span>
           ))}
         </div>
       </div>
     </section>
   );
 }
-

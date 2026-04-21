@@ -1,150 +1,99 @@
 """
-Rich-based interactive TUI for the review queue.
+Rich TUI for the `toolbank review` command.
 
-Replaces the plain-text cmd_review loop in cli.py with a full-screen
-console application using ``rich``.
-
-Usage (imported by cli.py):
-    from mcp_server.tui import run_review_tui
-    run_review_tui()
+Falls back to plain-text review when rich is not installed.
 """
 
 from __future__ import annotations
 
+import json as _json
 from typing import Any
 
-from rich.console import Console
-from rich.live import Live
-from rich.panel import Panel
-from rich.prompt import Prompt
-from rich.table import Table
 
-console = Console()
-
-
-def _build_table(items: list[dict[str, Any]]) -> Table:
-    """Render the current review queue as a rich Table."""
-    table = Table(title="[bold]Toolbank Review Queue[/]", show_header=True, header_style="bold cyan")
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Queue ID", width=8)
-    table.add_column("Record ID", width=35)
-    table.add_column("Confidence", width=10, justify="right")
-    table.add_column("Issues", width=30)
-    table.add_column("Status", width=10)
-
-    for idx, item in enumerate(items, 1):
-        issues_str = ", ".join(item.get("issues", [])[:2])
-        if len(item.get("issues", [])) > 2:
-            issues_str += f" +{len(item['issues']) - 2} more"
-        table.add_row(
-            str(idx),
-            str(item.get("queue_id", "")),
-            item.get("record_id", "")[:33],
-            f"{item.get('confidence', 0.0):.2f}",
-            issues_str[:28],
-            item.get("status", "pending").upper(),
-        )
-    return table
-
-
-def _show_detail(item: dict[str, Any]) -> None:
-    """Print a full detail panel for a single review item."""
-    candidate = item.get("candidate", {})
-    issues = item.get("issues", [])
-    console.print(Panel(
-        f"[b]Record:[/b] {item.get('record_id', '?')}\n"
-        f"[b]Confidence:[/b] {item.get('confidence', 0.0):.2f}\n"
-        f"[b]Queue ID:[/b] {item.get('queue_id', '?')}\n\n"
-        f"[b]Description:[/b]\n{candidate.get('description', '(none)')}\n\n"
-        f"[b]Source URLs:[/b]\n" + "\n".join(f"  - {u}" for u in candidate.get("source_urls", [])) + "\n\n"
-        f"[b]Issues ({len(issues)}):[/b]\n" + "\n".join(f"  ! {iss}" for iss in issues),
-        title=f"[bold]Item {item.get('queue_id')} Detail[/]",
-        border_style="yellow",
-    ))
-
-
-def run_review_tui(items: list[dict[str, Any]] | None = None) -> str | None:
-    """
-    Run the review TUI loop.
+def run_review_tui(items: list[dict[str, Any]]) -> None:
+    """Interactive review TUI using rich.
 
     Args:
-        items: List of review queue items. If None, loads from the database.
-
-    Returns:
-        The action taken: "approved", "rejected", or None if empty/aborted.
+        items: List of review-queue item dicts from ``get_review_queue``.
     """
-    if items is None:
-        from mcp_server.database import get_review_queue
-        items = get_review_queue()
+    try:
+        from rich.console import Console
+        from rich.layout import Layout
+        from rich.panel import Panel
+        from rich.syntax import Syntax
+    except ImportError:
+        _plain_review(items)
+        return
 
-    if not items:
-        console.print("[yellow]Review queue is empty.[/yellow]")
-        return None
+    console = Console()
+    from mcp_server.database import approve_review_item, reject_review_item
 
-    current = 0
-    result_action: str | None = None
+    for item in items:
+        console.clear()
+        record_json = _json.dumps(item.get("candidate", {}), indent=2)
+        syntax = Syntax(record_json, "json", theme="monokai", line_numbers=True)
 
-    with Live(
-        _build_table(items),
-        console=console,
-        refresh_per_second=4,
-        redirect_stdout=False,
-    ) as live:
-        while True:
-            item = items[current]
-            idx = current + 1
-            total = len(items)
+        info = (
+            f"Queue ID : {item['queue_id']}\n"
+            f"Record ID: {item['record_id']}\n"
+            f"Confidence: {item['confidence']:.2f}\n"
+            f"Issues: {', '.join(item.get('issues', [])) or 'none'}"
+        )
 
-            console.print(
-                f"\n[bold cyan]Item {idx}/{total}[/bold cyan]  "
-                f"Queue#{item['queue_id']}  "
-                f"record={item['record_id'][:40]}"
-            )
-            _show_detail(item)
+        layout = Layout()
+        layout.split_row(
+            Layout(Panel(syntax, title="Tool Record"), name="record", ratio=3),
+            Layout(
+                Panel(
+                    info
+                    + "\n\n[bold][a][/bold] approve  [bold][r][/bold] reject"
+                    + "  [bold][s][/bold] skip  [bold][q][/bold] quit",
+                    title="Actions",
+                ),
+                name="actions",
+                ratio=1,
+            ),
+        )
+        console.print(layout)
 
-            action = Prompt.ask(
-                "[bold]Action[/bold]  [dim](a)pprove / (r)eject / (s)kip / (n)ext / (p)rev / (q)uit[/dim]",
-                default="s",
-            ).strip().lower()
-
-            if action == "a":
-                from mcp_server.database import approve_review_item
-                approve_review_item(item["queue_id"])
-                result_action = "approved"
-                console.print(f"[green]✓ Approved queue#{item['queue_id']}[/green]")
-                del items[current]
-                if not items:
-                    break
-                if current >= len(items):
-                    current = len(items) - 1
-            elif action == "r":
-                from mcp_server.database import reject_review_item
-                reject_review_item(item["queue_id"])
-                result_action = "rejected"
-                console.print(f"[red]✗ Rejected queue#{item['queue_id']}[/red]")
-                del items[current]
-                if not items:
-                    break
-                if current >= len(items):
-                    current = len(items) - 1
-            elif action == "s":
-                console.print("[dim]Skipped[/dim]")
-                current = (current + 1) % len(items)
-            elif action == "n":
-                current = (current + 1) % len(items)
-            elif action == "p":
-                current = (current - 1) % len(items)
-            elif action == "q":
-                console.print("[yellow]Aborted.[/yellow]")
-                break
-            else:
-                console.print("[red]Unknown action.[/red]")
-
-            live.update(_build_table(items))
-
-    console.print(f"\n[bold]Review complete.[/bold]  Action: {result_action or 'none'}")
-    return result_action
+        action = console.input("\nAction [a/r/s/q]: ").strip().lower()
+        if action == "a":
+            approve_review_item(item["queue_id"])
+            console.print("[green]✓ Approved[/green]")
+        elif action == "r":
+            reject_review_item(item["queue_id"])
+            console.print("[red]✗ Rejected[/red]")
+        elif action == "q":
+            console.print("Exiting review.")
+            break
+        else:
+            console.print("[dim]Skipped[/dim]")
 
 
-if __name__ == "__main__":
-    run_review_tui()
+def _plain_review(items: list[dict[str, Any]]) -> None:
+    """Fallback plain-text review when rich is not installed.
+
+    Args:
+        items: List of review-queue item dicts from ``get_review_queue``.
+    """
+    from mcp_server.database import approve_review_item, reject_review_item
+
+    for item in items:
+        print("\n" + "=" * 60)
+        print(f"Queue ID : {item['queue_id']}")
+        print(f"Record ID: {item['record_id']}")
+        print(f"Confidence: {item['confidence']:.2f}")
+        print(f"Issues: {item.get('issues', [])}")
+        print(_json.dumps(item.get("candidate", {}), indent=2))
+        action = input("\n[a]pprove / [r]eject / [s]kip / [q]uit? ").strip().lower()
+        if action == "a":
+            approve_review_item(item["queue_id"])
+            print("✓ Approved")
+        elif action == "r":
+            reject_review_item(item["queue_id"])
+            print("✗ Rejected")
+        elif action == "q":
+            print("Exiting review.")
+            break
+        else:
+            print("Skipped")
