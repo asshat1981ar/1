@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { SchemaViewer } from "./components/SchemaViewer";
 import { CodeExamples } from "./components/CodeExamples";
+import { ExecutionsPanel } from "./components/ExecutionsPanel";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8765";
 
@@ -49,7 +50,7 @@ export default function ToolDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12">
-      <div className="mb-6">
+        <div className="mb-4">
         <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 mb-2 inline-block">
           {tool.namespace}
         </span>
@@ -74,6 +75,18 @@ export default function ToolDetailPage() {
           </span>
         </div>
         <p className="text-zinc-300 text-lg">{tool.description}</p>
+        {tool.status === "approved" || tool.status === "verified" ? (
+          <a
+            href={`/tools/${encodeURIComponent(tool.id)}/execute`}
+            className="inline-block mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded font-medium text-sm"
+          >
+            Execute
+          </a>
+        ) : (
+          <span className="inline-block mt-3 text-xs text-zinc-500">
+            Only approved tools can be executed
+          </span>
+        )}
       </div>
 
       {tool.tags?.length > 0 && (
@@ -111,6 +124,16 @@ export default function ToolDetailPage() {
           >
             Examples
           </button>
+          <button
+            onClick={() => setActiveTab("executions")}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${
+              activeTab === "executions"
+                ? "text-white border-b-2 border-blue-500"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Executions
+          </button>
         </div>
         <div className="mt-4">
           {activeTab === "schema" && (
@@ -125,6 +148,9 @@ export default function ToolDetailPage() {
           )}
           {activeTab === "examples" && (
             <CodeExamples toolName={`${tool.namespace}.${tool.name}`} schema={fullRecord.input_schema} />
+          )}
+          {activeTab === "executions" && (
+            <ExecutionsPanel toolId={tool.id} />
           )}
         </div>
       </div>

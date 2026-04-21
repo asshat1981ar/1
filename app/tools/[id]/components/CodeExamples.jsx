@@ -29,11 +29,14 @@ print(result)`;
 function generateJS(name, schema) {
   const props = schema.properties || {};
   const args = Object.keys(props).map((k) => `  ${k}: "${props[k].type === "integer" || props[k].type === "number" ? "0" : k}"`).join(",\n");
-  return `const response = await fetch("/api/tools/${name}", {
+  return `const response = await fetch("/api/tools/${name}/execute", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
+    arguments: {
 ${args}
+    },
+    confirmed: false,
   }),
 });
 const data = await response.json();
@@ -42,10 +45,11 @@ console.log(data);`;
 
 function generateCurl(name, schema) {
   const props = schema.properties || {};
-  const body = JSON.stringify(
-    Object.fromEntries(Object.keys(props).map((k) => [k, props[k].type === "integer" || props[k].type === "number" ? 0 : k]))
+  const argsObj = Object.fromEntries(
+    Object.keys(props).map((k) => [k, props[k].type === "integer" || props[k].type === "number" ? 0 : k])
   );
-  return `curl -X POST http://localhost:8765/tools/${encodeURIComponent(name)} \\
+  const body = JSON.stringify({ arguments: argsObj, confirmed: false });
+  return `curl -X POST /api/tools/${encodeURIComponent(name)}/execute \\
   -H "Content-Type: application/json" \\
   -d '${body}'`;
 }
@@ -74,7 +78,7 @@ func main() {
 ${Object.keys(props).map((k) => `        ${k.charAt(0).toUpperCase() + k.slice(1)}: ${props[k].type === "integer" || props[k].type === "number" ? "0" : `""`}`).join(",\n")}
     }
     body, _ := json.Marshal(req)
-    resp, err := http.Post("http://localhost:8765/tools/${name}", "application/json", bytes.NewBuffer(body))
+    resp, err := http.Post("/api/tools/${name}/execute", "application/json", bytes.NewBuffer(body))
     if err != nil {
         panic(err)
     }
