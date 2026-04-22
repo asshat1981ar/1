@@ -6,7 +6,7 @@ Stores canonical ToolbankRecord objects and failed query logs.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -116,6 +116,7 @@ class DestructiveApproval(Base):
     approver = Column(String, nullable=False)
     reason = Column(Text, nullable=True)
     approved_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
 
 
 class ToolExecution(Base):
@@ -129,6 +130,23 @@ class ToolExecution(Base):
     duration_ms = Column(Integer, nullable=False)
     error_message = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class HttpCache(Base):
+    """HTTP response cache backed by SQLite.
+
+    Stores per-URL responses with expiry metadata so the crawler can honour
+    Cache-Control max-age and avoid re-fetching fresh entries.
+    """
+
+    __tablename__ = "http_cache"
+
+    url = Column(String, primary_key=True)
+    content = Column(Text, nullable=False)
+    etag = Column(String, nullable=True)
+    last_modified = Column(String, nullable=True)
+    expires_at = Column(Float, nullable=True)  # Unix timestamp; None = forever
+    cached_at = Column(Float, nullable=False)  # Unix timestamp of when this was cached
 
 
 # ---------------------------------------------------------------------------
@@ -287,22 +305,29 @@ def approve_destructive_tool(tool_id: str, approver: str, reason: str = "") -> b
 
     Returns True if the approval was recorded (or already existed).
     Returns False if tool_id is empty.
+
+    Approvals expire 24 hours after approval time.
     """
     if not tool_id:
         return False
+    now = datetime.utcnow()
+    expires = now + timedelta(hours=24)
     with get_session() as session:
         existing = session.get(DestructiveApproval, tool_id)
         if existing:
-            # Idempotent – update reason and approver on re-approval
+            # Idempotent – update reason, approver, and reset expiry on re-approval
             existing.approver = approver
             existing.reason = reason
-            existing.approved_at = datetime.now(timezone.utc)
+            existing.approved_at = now
+            existing.expires_at = expires
         else:
             session.add(
                 DestructiveApproval(
                     tool_id=tool_id,
                     approver=approver,
                     reason=reason,
+                    approved_at=now,
+                    expires_at=expires,
                 )
             )
         session.commit()
@@ -310,12 +335,48 @@ def approve_destructive_tool(tool_id: str, approver: str, reason: str = "") -> b
 
 
 def is_destructive_approved(tool_id: str) -> bool:
-    """Return True if a destructive tool has been administratively approved."""
+    """Return True if a destructive tool has a non-expired administrative approval."""
     if not tool_id:
         return False
     with get_session() as session:
         row = session.get(DestructiveApproval, tool_id)
-        return row is not None
+        if not row:
+            return False
+        return row.expires_at > datetime.utcnow()
+
+
+def get_destructive_approval(tool_id: str) -> dict[str, Any] | None:
+    """Return approval record dict for tool_id or None."""
+    with get_session() as session:
+        row = session.get(DestructiveApproval, tool_id)
+        if not row:
+            return None
+        return {
+            "tool_id": row.tool_id,
+            "approver": row.approver,
+            "reason": row.reason,
+            "approved_at": row.approved_at,
+            "expires_at": row.expires_at,
+        }
+
+
+def list_destructive_approvals() -> list[dict[str, Any]]:
+    """Return all non-expired approval records."""
+    now = datetime.utcnow()
+    with get_session() as session:
+        rows = session.query(DestructiveApproval).filter(
+            DestructiveApproval.expires_at > now
+        ).all()
+        return [
+            {
+                "tool_id": r.tool_id,
+                "approver": r.approver,
+                "reason": r.reason,
+                "approved_at": r.approved_at,
+                "expires_at": r.expires_at,
+            }
+            for r in rows
+        ]
 
 
 def clear_destructive_approval(tool_id: str) -> bool:

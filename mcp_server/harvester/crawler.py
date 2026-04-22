@@ -5,20 +5,19 @@ HTTP crawler with robots.txt compliance, rate limiting, and caching.
 from __future__ import annotations
 
 import email.utils
-import hashlib
 import logging
 import re
 import time
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
 
+from mcp_server.database import HttpCache, get_session
+
 logger = logging.getLogger(__name__)
 
-_CACHE_DIR = Path("toolbank/.crawler_cache")
 _DEFAULT_USER_AGENT = "ToolbankHarvester/1.0 (+https://github.com/toolbank)"
 _REQUEST_DELAY = 1.0  # seconds between requests to the same host
 
@@ -27,7 +26,7 @@ class RobotsCache:
     """Per-host robots.txt cache."""
 
     def __init__(self):
-        self._cache: dict[str, RobotFileParser] = {}
+        self._cache: dict[str, RobotFileParser | None] = {}
 
     def allowed(self, url: str, user_agent: str = _DEFAULT_USER_AGENT) -> bool:
         parsed = urlparse(url)
@@ -41,7 +40,7 @@ class RobotsCache:
             except Exception as exc:
                 logger.debug("Could not fetch robots.txt for %s: %s", host_key, exc)
                 # Default to allowed when robots.txt is unreachable
-                rp = None  # type: ignore[assignment]
+                rp = None
             self._cache[host_key] = rp
         rp = self._cache[host_key]
         if rp is None:
@@ -49,33 +48,16 @@ class RobotsCache:
         return rp.can_fetch(user_agent, url)
 
 
-class PageCache:
-    """Simple on-disk page cache keyed by URL hash."""
-
-    def __init__(self, cache_dir: Path = _CACHE_DIR):
-        self.dir = cache_dir
-        self.dir.mkdir(parents=True, exist_ok=True)
-
-    def _key(self, url: str) -> Path:
-        return self.dir / (hashlib.sha256(url.encode()).hexdigest() + ".html")
-
-    def get(self, url: str) -> str | None:
-        path = self._key(url)
-        if path.exists():
-            return path.read_text(encoding="utf-8", errors="replace")
-        return None
-
-    def set(self, url: str, content: str) -> None:
-        self._key(url).write_text(content, encoding="utf-8")
-
-
 class Crawler:
     """
     Polite HTTP crawler.
+
     - Checks robots.txt (RFC 9309) before fetching.
     - Rate-limits requests per host.
-    - Caches responses in memory with HTTP cache-control expiry support.
+    - Caches responses in a SQLite-backed store (http_cache table) with HTTP
+      Cache-Control expiry support (max-age).
     - Supports both HTML and JSON responses.
+    - Purges stale DB entries on each run.
     """
 
     def __init__(
@@ -90,7 +72,7 @@ class Crawler:
         self.request_delay = request_delay
         self.robots = RobotsCache()
         self._use_cache = use_cache
-        # Cache format: url -> (content, content_type, expiry_ts | None)
+        # In-memory hot cache: url -> (content, content_type, expiry_ts | None)
         self._cache: dict[str, tuple[str, str, float | None]] = {}
         self._last_request: dict[str, float] = {}
         self._client = httpx.Client(
@@ -119,17 +101,30 @@ class Crawler:
         if not self.robots.allowed(url, self.user_agent):
             raise ValueError(f"Blocked by robots.txt: {url}")
 
-        # Check in-memory cache when caching is enabled
         if self._use_cache and not force:
+            # 1. Check in-memory cache first
             cached = self._cache.get(url)
             if cached is not None:
                 content, content_type, expiry_ts = cached
                 if expiry_ts is None or time.time() <= expiry_ts:
-                    logger.debug("Cache hit: %s", url)
+                    logger.debug("In-memory cache hit: %s", url)
                     return content, content_type
-                # Stale entry — evict and re-fetch
-                logger.debug("Cache stale, evicting: %s", url)
+                # Stale — evict from in-memory and re-fetch
+                logger.debug("In-memory cache stale, evicting: %s", url)
                 del self._cache[url]
+
+            # 2. Check DB cache
+            db_entry = self._db_get(url)
+            if db_entry is not None:
+                content, content_type, expiry_ts = db_entry
+                if expiry_ts is None or time.time() <= expiry_ts:
+                    logger.debug("DB cache hit: %s", url)
+                    # Promote to in-memory
+                    self._cache[url] = (content, content_type, expiry_ts)
+                    return content, content_type
+                # Stale — delete from DB
+                logger.debug("DB cache stale, deleting: %s", url)
+                self._db_delete(url)
 
         # Rate limiting per host
         host = urlparse(url).netloc
@@ -152,7 +147,12 @@ class Crawler:
 
         if self._use_cache:
             expiry_ts = self._parse_expiry(response.headers)
+            etag = response.headers.get("etag")
+            last_modified = response.headers.get("last-modified")
+            # Store in in-memory cache
             self._cache[url] = (content, content_type, expiry_ts)
+            # Persist to DB
+            self._db_set(url, content, etag, last_modified, expiry_ts)
 
         return content, content_type
 
@@ -198,22 +198,50 @@ class Crawler:
             return []
 
     def purge_stale(self) -> int:
-        """Remove all cache entries whose expiry timestamp has passed.
+        """Remove all stale entries from in-memory cache, DB cache, and return count.
+
+        Called at the start of each crawl run to keep the cache lean.
 
         Returns:
             Number of entries purged.
         """
         now = time.time()
-        stale = [
+        purged = 0
+
+        # Purge in-memory
+        stale_mem = [
             url
             for url, (_, _, expiry_ts) in self._cache.items()
             if expiry_ts is not None and now > expiry_ts
         ]
-        for url in stale:
+        for url in stale_mem:
             del self._cache[url]
-        if stale:
-            logger.debug("Purged %d stale cache entries", len(stale))
-        return len(stale)
+            purged += 1
+
+        # Purge DB
+        if self._use_cache:
+            session = get_session()
+            try:
+                from sqlalchemy import delete
+
+                stmt = delete(HttpCache).where(
+                    HttpCache.expires_at.isnot(None),
+                    HttpCache.expires_at < now,
+                )
+                result = session.execute(stmt)
+                session.commit()
+                db_purged = result.rowcount
+                purged += db_purged
+                if db_purged:
+                    logger.debug("Purged %d stale DB cache entries", db_purged)
+            except Exception as exc:
+                logger.warning("Failed to purge stale DB cache entries: %s", exc)
+            finally:
+                session.close()
+
+        if purged:
+            logger.debug("Purged %d stale cache entries total", purged)
+        return purged
 
     def close(self) -> None:
         """Close the underlying HTTP client."""
@@ -224,6 +252,70 @@ class Crawler:
 
     def __exit__(self, *args):
         self.close()
+
+    # ------------------------------------------------------------------
+    # DB cache helpers
+    # ------------------------------------------------------------------
+
+    def _db_get(self, url: str) -> Optional[tuple[str, str, float | None]]:
+        """Fetch a cache entry from the DB. Returns (content, content_type, expiry_ts) or None."""
+        try:
+            session = get_session()
+            try:
+                row = session.get(HttpCache, url)
+                if row is None:
+                    return None
+                # Reconstruct content_type - we store content only, but callers
+                # expect (content, content_type). Default to text/html for DB entries.
+                return (row.content, "text/html", row.expires_at)
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.warning("DB cache get failed for %s: %s", url, exc)
+            return None
+
+    def _db_set(
+        self,
+        url: str,
+        content: str,
+        etag: Optional[str],
+        last_modified: Optional[str],
+        expires_at: Optional[float],
+    ) -> None:
+        """Write a cache entry to the DB, overwriting any existing entry."""
+        try:
+            session = get_session()
+            try:
+                now = time.time()
+                session.merge(
+                    HttpCache(
+                        url=url,
+                        content=content,
+                        etag=etag,
+                        last_modified=last_modified,
+                        expires_at=expires_at,
+                        cached_at=now,
+                    )
+                )
+                session.commit()
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.warning("DB cache set failed for %s: %s", url, exc)
+
+    def _db_delete(self, url: str) -> None:
+        """Delete a cache entry from the DB."""
+        try:
+            session = get_session()
+            try:
+                row = session.get(HttpCache, url)
+                if row:
+                    session.delete(row)
+                    session.commit()
+            finally:
+                session.close()
+        except Exception as exc:
+            logger.warning("DB cache delete failed for %s: %s", url, exc)
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -241,7 +333,7 @@ class Crawler:
         """
         # Cache-Control: max-age takes precedence
         cache_control = headers.get("cache-control", "")
-        match = re.search(r"max-age\s*=\s*(\d+)", cache_control)
+        match = re.search(r"max-age\s*=\s*(\d+)", cache_control, re.IGNORECASE)
         if match:
             max_age = int(match.group(1))
             return time.time() + max_age
