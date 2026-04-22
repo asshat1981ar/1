@@ -274,6 +274,255 @@ class TestPurgeStale:
         assert purged == 3
 
 
+class TestRateLimitRetry:
+    """Tests for HTTP 429 rate-limit retry with exponential backoff."""
+
+    def _mock_429_response(self, retry_after: str | None = None, body="Rate limited"):
+        """Factory for a 429 response mock."""
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = body
+        mock_response.headers = {}
+        if retry_after is not None:
+            mock_response.headers["Retry-After"] = retry_after
+        return mock_response
+
+    def _mock_200_response(self, body="OK"):
+        """Factory for a 200 response mock."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = body
+        mock_response.headers = {"content-type": "text/html"}
+        mock_response.raise_for_status = MagicMock()
+        return mock_response
+
+    def test_retry_on_429_retries_up_to_max_attempts(self):
+        """On 429, crawler should retry up to 3 times before giving up."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                # Return 429 three times, then 200 (only 3 retries allowed)
+                # total attempts: initial(429) + 3 retries(429,429,200) = success on 4th
+                mock_client.get.side_effect = [
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                ]
+
+                # Should raise after max retries exhausted
+                with pytest.raises(Exception) as exc_info:
+                    with patch("time.sleep"):  # skip actual sleeps
+                        crawler.fetch("https://example.com/api")
+                assert "429" in str(exc_info.value)
+                assert mock_client.get.call_count == 4  # initial + 3 retries
+
+    def test_retry_succeeds_on_eventual_success(self):
+        """If 429 resolves before max retries, return the successful response."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                # Return 429 once, then success
+                mock_client.get.side_effect = [
+                    self._mock_429_response(),
+                    self._mock_200_response(body="success!"),
+                ]
+
+                with patch("time.sleep"):  # skip actual sleeps
+                    content, ct = crawler.fetch("https://example.com/api")
+
+                assert content == "success!"
+                assert mock_client.get.call_count == 2
+
+    def test_retry_after_header_used_when_present(self):
+        """Retry-After header should override backoff calculation."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                # Return 429 with Retry-After: 5, then success
+                mock_client.get.side_effect = [
+                    self._mock_429_response(retry_after="5"),
+                    self._mock_200_response(body="after retry-after"),
+                ]
+
+                sleep_calls = []
+                original_sleep = time.sleep
+                def track_sleep(duration):
+                    sleep_calls.append(duration)
+                    original_sleep(0)  # don't actually wait
+
+                with patch.object(time, "sleep", side_effect=track_sleep):
+                    content, _ = crawler.fetch("https://example.com/api")
+
+                # First retry should wait for Retry-After value
+                assert sleep_calls[0] == 5.0
+
+    def test_retry_after_header_integer_seconds(self):
+        """Retry-After header may be an integer (RFC 7231)."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                mock_client.get.side_effect = [
+                    self._mock_429_response(retry_after="120"),
+                    self._mock_200_response(),
+                ]
+
+                sleep_calls = []
+                with patch.object(time, "sleep", side_effect=lambda d: sleep_calls.append(d)):
+                    crawler.fetch("https://example.com/api")
+
+                assert sleep_calls[0] == 120.0
+
+    def test_exponential_backoff_formula(self):
+        """Backoff = min(base * 2^attempt + jitter, 60s)."""
+        from mcp_server.harvester.crawler import Crawler, _compute_backoff
+
+        # Test the formula directly
+        # base=1.0, attempt=0 -> 1.0 + jitter(0-1) -> clamped to 1.x
+        delays = []
+        for attempt in range(3):
+            delay = _compute_backoff(base=1.0, attempt=attempt)
+            delays.append(delay)
+            assert delay <= 60.0, f"delay {delay} exceeds 60s cap"
+            assert delay >= 0, f"delay {delay} is negative"
+
+        # Verify exponential growth: each delay > previous (with high probability)
+        # At attempt=0: ~1-2s, attempt=1: ~2-4s, attempt=2: ~4-8s
+        assert delays[1] > delays[0], "backoff should grow with attempt"
+        assert delays[2] > delays[1], "backoff should grow exponentially"
+
+    def test_backoff_capped_at_60_seconds(self):
+        """Backoff should never exceed 60 seconds."""
+        from mcp_server.harvester.crawler import _compute_backoff
+
+        # Very large base or many attempts should still be capped
+        delay = _compute_backoff(base=100.0, attempt=10)
+        assert delay == 60.0
+
+    def test_each_retry_logged_at_warning(self):
+        """Each retry attempt should be logged at WARNING level."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+                mock_client.get.side_effect = [
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                    self._mock_429_response(),
+                ]
+
+                with patch("time.sleep"):
+                    with patch("mcp_server.harvester.crawler.logger.warning") as mock_warn:
+                        try:
+                            crawler.fetch("https://example.com/api")
+                        except Exception:
+                            pass
+
+                # Should have logged at least 3 warnings (one per retry)
+                assert mock_warn.call_count >= 3
+                for call in mock_warn.call_args_list:
+                    args_str = " ".join(str(a) for a in call.args)
+                    assert "429" in args_str or "retry" in args_str.lower()
+
+    def test_error_logged_after_max_retries_exceeded(self):
+        """After max retries exhausted, an error should be logged."""
+        from mcp_server.harvester.crawler import Crawler
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+                mock_client.get.return_value = self._mock_429_response()
+
+                with patch("time.sleep"):
+                    with patch("mcp_server.harvester.crawler.logger.error") as mock_error:
+                        try:
+                            crawler.fetch("https://example.com/api")
+                        except Exception:
+                            pass
+
+                assert mock_error.call_count >= 1
+
+    def test_retry_policy_from_config_respected(self):
+        """Crawler should accept a retry_policy dict from config."""
+        from mcp_server.harvester.crawler import Crawler
+
+        policy = {"max_retries": 5, "base_delay": 2.0}
+        crawler = Crawler(use_cache=False, retry_policy=policy)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                # Return 429 five times
+                mock_client.get.side_effect = [
+                    self._mock_429_response() for _ in range(6)
+                ]
+
+                with patch("time.sleep"):
+                    try:
+                        crawler.fetch("https://example.com/api")
+                    except Exception:
+                        pass
+
+                # 1 initial + 5 retries = 6 calls
+                assert mock_client.get.call_count == 6
+
+    def test_no_retry_on_other_http_errors(self):
+        """Non-429 errors should NOT be retried (e.g. 500, 404)."""
+        from mcp_server.harvester.crawler import Crawler
+        import httpx
+
+        crawler = Crawler(use_cache=False)
+
+        with patch.object(crawler, "_client") as mock_client:
+            with patch.object(crawler, "robots") as mock_robots:
+                mock_robots.allowed.return_value = True
+
+                mock_response = MagicMock()
+                mock_response.status_code = 500
+                mock_response.text = "Server Error"
+                mock_response.headers = {}
+                # Make raise_for_status raise HTTPStatusError
+                mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+                    "Server Error", request=MagicMock(), response=mock_response
+                )
+                mock_client.get.return_value = mock_response
+
+                with patch("time.sleep"):
+                    with pytest.raises(Exception) as exc_info:
+                        crawler.fetch("https://example.com/api")
+                    assert "500" in str(exc_info.value)
+
+                # Should only be called once - no retries for non-429
+                assert mock_client.get.call_count == 1
+
+
 class TestDbCacheIntegration:
     """Integration tests for DB-backed http_cache table used by Crawler."""
 

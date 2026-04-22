@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import email.utils
 import logging
+import random
 import re
 import time
 from typing import Any, Optional
@@ -20,6 +21,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_USER_AGENT = "ToolbankHarvester/1.0 (+https://github.com/toolbank)"
 _REQUEST_DELAY = 1.0  # seconds between requests to the same host
+_DEFAULT_RETRY_POLICY = {"max_retries": 3, "base_delay": 1.0}
+
+
+def _compute_backoff(base: float, attempt: int) -> float:
+    """Compute backoff delay: min(base * 2^attempt + jitter, 60)."""
+    jitter = random.random()  # 0 <= jitter < 1
+    delay = base * (2 ** attempt) + jitter
+    return min(delay, 60.0)
 
 
 class RobotsCache:
@@ -67,11 +76,13 @@ class Crawler:
         timeout: float = 20.0,
         use_cache: bool = True,
         follow_redirects: bool = True,
+        retry_policy: dict | None = None,
     ):
         self.user_agent = user_agent
         self.request_delay = request_delay
         self.robots = RobotsCache()
         self._use_cache = use_cache
+        self._retry_policy = retry_policy if retry_policy is not None else _DEFAULT_RETRY_POLICY.copy()
         # In-memory hot cache: url -> (content, content_type, expiry_ts | None)
         self._cache: dict[str, tuple[str, str, float | None]] = {}
         self._last_request: dict[str, float] = {}
@@ -134,13 +145,54 @@ class Crawler:
             time.sleep(sleep_time)
         self._last_request[host] = time.monotonic()
 
-        try:
-            response = self._client.get(url)
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise ValueError(f"HTTP {exc.response.status_code} fetching {url}") from exc
-        except httpx.RequestError as exc:
-            raise ValueError(f"Request error fetching {url}: {exc}") from exc
+        max_retries = self._retry_policy.get("max_retries", 3)
+        base_delay = self._retry_policy.get("base_delay", 1.0)
+
+        attempt = 0
+        while True:
+            try:
+                response = self._client.get(url)
+                if response.status_code == 429:
+                    if attempt < max_retries:
+                        # Check for Retry-After header
+                        retry_after = response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                            except ValueError:
+                                delay = _compute_backoff(base_delay, attempt)
+                        else:
+                            delay = _compute_backoff(base_delay, attempt)
+                        logger.warning("HTTP 429 fetching %s — retrying in %.1fs (attempt %d/%d)", url, delay, attempt + 1, max_retries)
+                        time.sleep(delay)
+                        attempt += 1
+                        continue
+                    else:
+                        logger.error("HTTP 429 fetching %s — max retries (%d) exceeded", url, max_retries)
+                        raise ValueError(f"HTTP 429 fetching {url} — max retries exceeded")
+                response.raise_for_status()
+                break
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 429:
+                    if attempt < max_retries:
+                        retry_after = exc.response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                            except ValueError:
+                                delay = _compute_backoff(base_delay, attempt)
+                        else:
+                            delay = _compute_backoff(base_delay, attempt)
+                        logger.warning("HTTP 429 fetching %s — retrying in %.1fs (attempt %d/%d)", url, delay, attempt + 1, max_retries)
+                        time.sleep(delay)
+                        attempt += 1
+                        continue
+                    else:
+                        logger.error("HTTP 429 fetching %s — max retries (%d) exceeded", url, max_retries)
+                        raise ValueError(f"HTTP 429 fetching {url} — max retries exceeded")
+                raise ValueError(f"HTTP {exc.response.status_code} fetching {url}") from exc
+            except httpx.RequestError as exc:
+                raise ValueError(f"Request error fetching {url}: {exc}") from exc
 
         content = response.text
         content_type = response.headers.get("content-type", "text/html")
