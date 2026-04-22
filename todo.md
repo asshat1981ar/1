@@ -58,10 +58,12 @@
   - `cmd_export` at line 96
   - ✅ Done — docs/API_REFERENCE.md not yet created
 
-- [ ] **HTTP cache expiry & invalidation** (`mcp_server/harvester/crawler.py`)
-  - Respect `Cache-Control` / `Expires` headers from crawled pages
-  - Add `--no-cache` flag (already in CLI spec, must be wired through)
-  - Purge stale cache entries on each harvest run
+- [x] **HTTP cache expiry & invalidation** (`mcp_server/harvester/crawler.py`)
+  - `http_cache` SQLite table: url, content, etag, last_modified, expires_at, cached_at
+  - `Cache-Control: max-age=N` and `Expires` header parsing
+  - `--no-cache` wired: `use_cache=False` bypasses read, overwrites on write
+  - Stale entries purged on each harvest run
+  - Commit `72a9c4b`
 
 ### Infrastructure
 
@@ -79,9 +81,11 @@
 
 ## v0.3 — Extensibility
 
-- [ ] **Multi-source evidence merging** (`mcp_server/harvester/deduper.py`)
-  - When the same tool appears in multiple docs pages, merge evidence arrays
-  - Weighted confidence: average of source confidences, not just the winner's
+- [x] **Multi-source evidence merging** (`mcp_server/harvester/deduper.py`)
+  - Evidence arrays merged on duplicate (same name+namespace)
+  - Weighted confidence: `sum(evidence_confidence * source_confidence) / sum(source_confidence)`
+  - `merged_from` metadata tracks source_confidence per evidence item
+  - Commit `fbd8eaf`
 
 - [ ] **GraphQL introspection extractor** (`mcp_server/harvester/extractors/graphql_extractor.py`)
   - POST `{ __schema { ... } }` to detected GraphQL endpoints
@@ -100,10 +104,12 @@
   - Add a `tool_versions` table tracking `(tool_id, version_hash, changed_at, diff)`
   - Expose history via `toolbank list --history <tool_id>`
 
-- [ ] **Admin approval API for destructive tools** (`mcp_server/server.py`)
-  - New MCP tool: `approve_destructive_tool(tool_id, admin_token)`
-  - One-time approval stored in the registry; expires after 24 h
-  - Must be documented in `docs/GUARDRAILS.md`
+- [x] **Admin approval API for destructive tools** (`mcp_server/server.py`)
+  - MCP tool `approve_destructive_tool(tool_id, admin_token)` registered
+  - `MCP_ADMIN_TOKEN` env var validation
+  - `destructive_approvals` table: tool_id, approved_at, expires_at, admin
+  - 24h TTL; execution blocked without valid unexpired approval
+  - Commit `6157c3c`
 
 - [x] **Webhook/event adapter** (`mcp_server/server.py`)
   - `execution_adapter.kind = "webhook"` supported in `execute_tool`
@@ -126,13 +132,18 @@
   - Track: search latency, harvest throughput, tool execution count, error rates
   - Expose `/metrics` endpoint (optional HTTP sidecar, guarded by env flag)
 
-- [ ] **Structured JSON logging** (all `mcp_server/` modules)
-  - Replace `print`/basic logging with `structlog` or `logging` + JSON formatter
-  - Log level controlled by `LOG_LEVEL` env var
+- [x] **Structured JSON logging** (`mcp_server/logging_config.py`)
+  - `JsonFormatter` class: JSON per log line with timestamp, level, logger, message
+  - `setup_logging()` reads `LOG_LEVEL` env var (defaults INFO)
+  - All `print()` in cli.py replaced with logger calls
+  - Commit `d167046`
 
-- [ ] **Rate-limit retry with exponential backoff** (`mcp_server/harvester/crawler.py`)
-  - Detect HTTP 429; retry with jitter up to 3 attempts
-  - Configurable via `config/sources.yaml` per-source `retry_policy`
+- [x] **Rate-limit retry with exponential backoff** (`mcp_server/harvester/crawler.py`)
+  - Backoff formula: `min(base * 2^attempt + jitter, 60s)`
+  - `Retry-After` header respected (integer seconds)
+  - 3 retries max; WARNING per retry, ERROR after exhaustion
+  - `retry_policy` dict configurable via sources.yaml
+  - Commit `d167046` (combined with logging)
 
 - [ ] **Distributed harvest queue** (`mcp_server/harvester/harvester.py`)
   - Optional Celery or ARQ backend when `REDIS_URL` env var is set
