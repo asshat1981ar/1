@@ -30,8 +30,9 @@ from mcp import types
 from mcp.server import Server
 from mcp_server import database, vector_store
 from mcp_server.harvester import ToolbankHarvester
+from mcp_server.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

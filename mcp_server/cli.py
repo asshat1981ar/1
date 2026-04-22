@@ -19,7 +19,9 @@ import logging
 import sys
 from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+from mcp_server.logging_config import setup_logging
+
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -37,7 +39,7 @@ def cmd_harvest(args: argparse.Namespace) -> None:
         try:
             import yaml  # type: ignore
         except ImportError:
-            print("ERROR: pyyaml not installed. Run: pip install pyyaml")
+            logger.error("pyyaml not installed. Run: pip install pyyaml")
             sys.exit(1)
         with open(args.config) as f:
             config = yaml.safe_load(f)
@@ -48,21 +50,21 @@ def cmd_harvest(args: argparse.Namespace) -> None:
         for source in sources:
             urls.extend(source.get("seed_urls", []))
     else:
-        print("ERROR: Provide --url or --config")
+        logger.error("Provide --url or --config")
         sys.exit(1)
 
     total = 0
     for url in urls:
-        print(f"\n→ Harvesting: {url}")
+        logger.info("Harvesting: %s", url)
         try:
             records = harvester.harvest(url, max_pages=args.max_pages)
-            print(f"  ✓ Published {len(records)} records")
+            logger.info("Published %d records from %s", len(records), url)
             total += len(records)
         except Exception as exc:
-            print(f"  ✗ Error: {exc}")
+            logger.error("Error harvesting %s: %s", url, exc)
 
     harvester.close()
-    print(f"\nTotal records published: {total}")
+    logger.info("Total records published: %d", total)
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -71,13 +73,13 @@ def cmd_list(args: argparse.Namespace) -> None:
     init_db()
     records = list_tools(status=args.status or None, namespace=args.namespace or None)
     if not records:
-        print("No records found.")
+        logger.info("No records found.")
         return
     for rec in records:
         status_tag = rec.get("status", "?").upper()
         conf = rec.get("confidence", 0.0)
-        print(f"[{status_tag}] {rec['id']:<50} conf={conf:.2f}  {rec.get('description','')[:60]}")
-    print(f"\nTotal: {len(records)}")
+        logger.info("[%s] %-50s conf=%.2f  %s", status_tag, rec["id"], conf, rec.get("description", "")[:60])
+    logger.info("Total: %d", len(records))
 
 
 def cmd_review(args: argparse.Namespace) -> None:
@@ -87,7 +89,7 @@ def cmd_review(args: argparse.Namespace) -> None:
     init_db()
     items = get_review_queue()
     if not items:
-        print("Review queue is empty.")
+        logger.info("Review queue is empty.")
         return
 
     run_review_tui(items)
@@ -145,16 +147,16 @@ def cmd_gaps(args: argparse.Namespace) -> None:
     init_db()
     failed = get_failed_queries(limit=200)
     if not failed:
-        print("No failed queries logged.")
+        logger.info("No failed queries logged.")
         return
 
     gaps = analyse_gaps(failed)
-    print(f"\nTop capability gaps ({len(gaps)} unique goals):\n")
+    logger.info("Top capability gaps (%d unique goals):", len(gaps))
     for gap in gaps[:20]:
-        print(f"  [{gap['frequency']:3d}x] {gap['goal']}")
+        logger.info("[%3dx] %s", gap["frequency"], gap["goal"])
         seeds = generate_seeds(gap)
         for seed in seeds:
-            print(f"         → Suggested seed: {seed['name']} ({seed['url']})")
+            logger.info("Suggested seed: %s (%s)", seed["name"], seed["url"])
 
 
 def cmd_server(_args: argparse.Namespace) -> None:
