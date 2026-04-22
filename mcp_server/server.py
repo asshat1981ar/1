@@ -235,7 +235,25 @@ async def _search_tools(args: dict[str, Any]) -> list[types.TextContent]:
 def _approve_destructive_tool(args: dict[str, Any]) -> list[types.TextContent]:
     """Handle the approve_destructive_tool MCP tool call."""
     tool_id = args.get("tool_id", "")
+    admin_token = args.get("admin_token", "")
     reason = args.get("reason", "")
+
+    # Validate admin token against env var
+    expected_token = os.environ.get("MCP_ADMIN_TOKEN", "")
+    if not expected_token:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps({"error": "Admin approval is not configured (MCP_ADMIN_TOKEN not set)."}),
+            )
+        ]
+    if admin_token != expected_token:
+        return [
+            types.TextContent(
+                type="text",
+                text=json.dumps({"error": "Invalid admin token."}),
+            )
+        ]
 
     if not tool_id:
         return [
