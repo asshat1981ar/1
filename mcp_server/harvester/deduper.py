@@ -94,7 +94,9 @@ def deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     When duplicates are found:
     - Keep the record with the highest confidence as the primary.
     - Merge ``source_urls`` from all duplicates (union, order-preserving).
-    - Merge ``evidence`` lists from all duplicates (union).
+    - Merge ``evidence`` lists from all duplicates, computing weighted confidence
+      per evidence item: sum(evidence_confidence * source_confidence) / sum(source_confidence)
+    - Store ``merged_from`` metadata on each evidence item to track contributing sources.
     - Recompute ``confidence`` as the weighted average of the group.
     """
     # Phase 1: group records by their DNA key
@@ -125,15 +127,62 @@ def deduplicate(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     merged_urls.append(url)
                     seen_urls.add(url)
 
-        # Merge evidence lists (union)
-        merged_evidence: list[Any] = []
-        seen_evidence: set[str] = set()
+        # Merge evidence with weighted confidence
+        # Group evidence by normalized key (excluding confidence for matching)
+        evidence_groups: dict[str, dict[str, Any]] = {}
+
+        def _evidence_key(ev: Any) -> str:
+            """Normalize evidence for matching - exclude confidence."""
+            if isinstance(ev, dict):
+                # Create a copy without confidence for matching
+                match_dict = {k: v for k, v in ev.items() if k != "confidence"}
+                return json.dumps(match_dict, sort_keys=True)
+            return str(ev)
+
         for r in group:
+            source_confidence = r.get("confidence", 0)
             for ev in r.get("evidence", []):
-                ev_key = json.dumps(ev, sort_keys=True) if isinstance(ev, dict) else str(ev)
-                if ev_key not in seen_evidence:
+                ev_key = _evidence_key(ev)
+                if isinstance(ev, dict):
+                    ev_conf = ev.get("confidence", 0.5)
+                else:
+                    ev_conf = 0.5
+
+                if ev_key not in evidence_groups:
+                    evidence_groups[ev_key] = {
+                        "evidence": ev,
+                        "sources": [],  # list of (source_confidence, evidence_confidence)
+                    }
+                evidence_groups[ev_key]["sources"].append((source_confidence, ev_conf))
+
+        # Build merged evidence with weighted confidence and merged_from metadata
+        merged_evidence: list[Any] = []
+        for ev_key, group_data in evidence_groups.items():
+            ev = group_data["evidence"]
+            sources = group_data["sources"]
+
+            if isinstance(ev, dict):
+                # Compute weighted confidence
+                total_weight = sum(sc for sc, ec in sources)
+                weighted_conf = sum(ec * sc for sc, ec in sources) / total_weight if total_weight > 0 else 0.5
+
+                merged_ev = dict(ev)
+                merged_ev["confidence"] = weighted_conf
+                merged_ev["merged_from"] = [
+                    {"source_confidence": sc, "evidence_confidence": ec}
+                    for sc, ec in sources
+                ]
+                merged_evidence.append(merged_ev)
+            else:
+                # Non-dict evidence: keep as-is, add merged_from if multiple sources
+                if len(sources) > 1:
+                    merged_ev = {"original": ev, "merged_from": [
+                        {"source_confidence": sc, "evidence_confidence": ec}
+                        for sc, ec in sources
+                    ]}
+                    merged_evidence.append(merged_ev)
+                else:
                     merged_evidence.append(ev)
-                    seen_evidence.add(ev_key)
 
         # Weighted-average confidence
         avg_confidence = sum(r.get("confidence", 0) for r in group) / len(group)
