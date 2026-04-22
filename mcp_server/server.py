@@ -746,9 +746,16 @@ async def _execute_graphql(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute a GraphQL adapter by POSTing query + variables to the endpoint."""
-    url = adapter.get("url_template", "")
-    if not url:
+    raw_url = adapter.get("url_template", "")
+    if not raw_url:
         return {"error": "No url_template in execution_adapter"}
+
+    # Substitute {key} placeholders in URL and headers
+    url = _substitute_template(raw_url, arguments)
+    headers: dict[str, str] = {
+        k: _substitute_template(v, arguments)
+        for k, v in adapter.get("headers", {}).items()
+    }
 
     query = adapter.get("query", "")
     if not query:
@@ -756,8 +763,6 @@ async def _execute_graphql(
 
     variables_map: dict[str, str] = adapter.get("variables_map", {})
     variables = {gql_var: arguments.get(arg_key) for gql_var, arg_key in variables_map.items()}
-
-    headers: dict[str, str] = dict(adapter.get("headers", {}))
     auth_info = record.get("auth", {})
     for env_var in auth_info.get("required_env", []):
         value = os.environ.get(env_var)
