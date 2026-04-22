@@ -34,25 +34,29 @@
 
 ### Backend — Toolbank MCP
 
-- [ ] **GraphQL adapter** (`mcp_server/harvester/extractors/` + `server.py`)
-  - New `execution_adapter.kind = "graphql"` support in `execute_tool`
+- [x] **GraphQL adapter** (`mcp_server/server.py`)
+  - `execution_adapter.kind = "graphql"` supported in `execute_tool`
   - HTTP POST to `url_template` with `query` and `variables` fields
   - Policy enforcement identical to the REST adapter
+  - ✅ Done: two `_execute_graphql` implementations at lines 548 and 743
 
-- [ ] **Python function adapter** (`mcp_server/server.py`)
-  - New `execution_adapter.kind = "python"` support
+- [x] **Python function adapter** (`mcp_server/server.py`)
+  - `execution_adapter.kind = "python"` and `"python_func"` supported
   - Dynamically import and call a local Python function by dotted path
-  - Sandbox: disallow any module not listed in an explicit allowlist
+  - Sandbox: `_PYTHON_ADAPTER_ALLOWLIST` disallows unlisted modules
+  - ✅ Done: `_execute_python` (line 628) and `_execute_python_func` (line 786)
 
-- [ ] **`toolbank review` TUI** (`mcp_server/cli.py` + new `mcp_server/tui.py`)
-  - Replace the current plain-text review loop with a `rich`-based interactive TUI
+- [x] **`toolbank review` TUI** (`mcp_server/tui.py`)
+  - Rich-based interactive TUI with `run_review_tui`, `_plain_review`
   - Keyboard shortcuts: `a` approve · `r` reject · `q` quit · `?` help
-  - Show full `ToolbankRecord` details in a panel alongside the action menu
+  - `_build_table` (line 4) and `_show_detail` (line 14) helpers
+  - ✅ Done
 
-- [ ] **`toolbank export` command** (`mcp_server/cli.py`)
-  - New CLI sub-command: `toolbank export [--format json|csv] [--output PATH]`
+- [x] **`toolbank export` command** (`mcp_server/cli.py`)
+  - CLI sub-command: `toolbank export [--format json|csv] [--output PATH]`
   - Exports all approved records from the SQLite registry
-  - Document in `docs/API_REFERENCE.md`
+  - `cmd_export` at line 96
+  - ✅ Done — docs/API_REFERENCE.md not yet created
 
 - [ ] **HTTP cache expiry & invalidation** (`mcp_server/harvester/crawler.py`)
   - Respect `Cache-Control` / `Expires` headers from crawled pages
@@ -101,9 +105,10 @@
   - One-time approval stored in the registry; expires after 24 h
   - Must be documented in `docs/GUARDRAILS.md`
 
-- [ ] **Webhook/event adapter** (`mcp_server/server.py`)
-  - New `execution_adapter.kind = "webhook"` support
-  - POST event payload to `url_template`; optional HMAC signing
+- [x] **Webhook/event adapter** (`mcp_server/server.py`)
+  - `execution_adapter.kind = "webhook"` supported in `execute_tool`
+  - `_execute_webhook` at line 432 with template substitution for URL/headers/body
+  - ✅ Done — HMAC signing not yet implemented
 
 - [ ] **Namespace priority weighting** (`mcp_server/vector_store.py`)
   - Allow `config/sources.yaml` entries to carry a `priority` float
